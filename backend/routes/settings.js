@@ -7,7 +7,9 @@ const { authenticate } = require('../middleware/auth');
 const { checkPermission, logAudit, getClientIp } = require('../middleware/rbac');
 
 const router = express.Router();
-const dbPath = path.join(__dirname, '..', 'database', 'municipal.db');
+const dbPath = process.env.DB_PATH
+  ? path.resolve(process.env.DB_PATH)
+  : path.join(__dirname, '..', 'database', 'municipal.db');
 const backupsDir = path.join(__dirname, '..', 'backups');
 
 router.get('/office', authenticate, (req, res) => {

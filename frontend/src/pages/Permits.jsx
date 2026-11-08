@@ -1,9 +1,16 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../api/client';
-import { Icon, Modal, Pagination, PERMIT_TYPES, STATUS_LABELS, formatCurrency, formatDate, CustomSelect, CustomDatePicker } from '../components/UI';
+import {
+  Icon, Modal, Pagination, PERMIT_TYPES, STATUS_LABELS, formatCurrency, formatDate,
+  formatDateTime, CustomSelect, CustomDatePicker,
+} from '../components/UI';
+import DocumentsPanel from '../components/DocumentsPanel';
+import Receipt from '../components/Receipt';
 
 const STEPS = ['Application Details', 'Requirements', 'Payment', 'Review'];
+const STATUS_FLOW = ['submitted', 'for_review', 'for_approval', 'approved', 'paid', 'released'];
+
 const emptyForm = {
   permit_type: 'building',
   client_id: '',
@@ -18,7 +25,12 @@ const emptyForm = {
 };
 
 export default function Permits() {
-  const { hasAccess } = useAuth();
+  const { user } = useAuth();
+  const isClient = user?.role === 'viewer';
+  const isStaff = ['engineering_staff', 'admin'].includes(user?.role);
+  const isEngineer = user?.role === 'municipal_engineer';
+  const canReviewDocuments = ['admin', 'engineering_staff', 'municipal_engineer'].includes(user?.role);
+
   const [permits, setPermits] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -27,36 +39,74 @@ export default function Permits() {
   const [type, setType] = useState('');
   const [loading, setLoading] = useState(true);
   const [clients, setClients] = useState([]);
+  const [myClient, setMyClient] = useState(null);
   const [staff, setStaff] = useState([]);
   const [step, setStep] = useState(0);
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [selectedPermit, setSelectedPermit] = useState(null);
+  const [previewData, setPreviewData] = useState(null);
+  const [receiptData, setReceiptData] = useState(null);
+  const [decision, setDecision] = useState(null);
+  const [decisionRemarks, setDecisionRemarks] = useState('');
+  const [decisionError, setDecisionError] = useState('');
+  const [actionLoading, setActionLoading] = useState(false);
+  const [viewError, setViewError] = useState('');
+  const [viewSuccess, setViewSuccess] = useState('');
   const [error, setError] = useState('');
 
-  const load = useCallback(() => {
-    setLoading(true);
-    api.getPermits({ search, status, type, page, limit: 10 })
-      .then((d) => {
-        setPermits(d.permits);
-        setTotal(d.total);
-      })
-      .finally(() => setLoading(false));
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
+    try {
+      const data = await api.getPermits({ search, status, type, page, limit: 10 });
+      setPermits(data.permits);
+      setTotal(data.total);
+    } catch (err) {
+      if (!silent) setError(err.message);
+    } finally {
+      if (!silent) setLoading(false);
+    }
   }, [page, search, status, type]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Poll so status changes made on another laptop appear without a manual reload.
   useEffect(() => {
-    api.getClients({ search: '', page: 1, limit: 1000 }).then((d) => setClients(d.clients));
-    api.getStaff().then(setStaff);
-  }, []);
+    const timer = setInterval(() => load(true), 20000);
+    return () => clearInterval(timer);
+  }, [load]);
+
+  useEffect(() => {
+    if (isClient) {
+      api.getMyClient()
+        .then((client) => { setMyClient(client); setClients([client]); })
+        .catch((err) => setError(err.message));
+    } else {
+      api.getClients({ search: '', page: 1, limit: 1000 })
+        .then((d) => setClients(d.clients))
+        .catch(() => {});
+    }
+    if (!isClient) {
+      api.getStaff().then(setStaff).catch(() => {});
+    }
+  }, [isClient]);
 
   const selectedClient = useMemo(
     () => clients.find((c) => String(c.id) === String(form.client_id)),
-    [clients, form.client_id]
+    [clients, form.client_id],
   );
 
+  const refreshSelected = async (permitId = selectedPermit?.id) => {
+    if (!permitId) return;
+    try {
+      setSelectedPermit(await api.getPermit(permitId));
+    } catch (err) {
+      setViewError(err.message);
+    }
+  };
+
   const openCreate = () => {
-    setForm(emptyForm);
+    setForm({ ...emptyForm, client_id: myClient?.id ? String(myClient.id) : '' });
     setStep(0);
     setError('');
     setSelectedPermit(null);
@@ -64,74 +114,130 @@ export default function Permits() {
   };
 
   const openView = async (permit) => {
-    const data = await api.getPermit(permit.id);
-    setSelectedPermit(data);
-    setModal('view');
+    setViewError('');
+    setViewSuccess('');
+    try {
+      const data = await api.getPermit(permit.id);
+      setSelectedPermit(data);
+      setModal('view');
+    } catch (err) {
+      alert(err.message);
+    }
   };
 
   const openPreview = async (permit) => {
-    const data = await api.getPermitPreview(permit.id);
-    setSelectedPermit(data);
-    setModal('preview');
+    try {
+      setPreviewData(await api.getPermitPreview(permit.id));
+      setModal('preview');
+    } catch (err) {
+      alert(err.message);
+    }
   };
 
   const handleCreate = async () => {
-    if (!form.client_id) {
-      setError('Please select a client.');
+    const clientId = isClient ? myClient?.id : form.client_id;
+    if (!clientId) {
+      setError(isClient
+        ? 'Your client profile is still loading. Please try again.'
+        : 'Please select a client.');
       setStep(0);
       return;
     }
     try {
       await api.createPermit({
         ...form,
-        client_id: Number(form.client_id),
-        assigned_staff_id: form.assigned_staff_id ? Number(form.assigned_staff_id) : null,
+        client_id: Number(clientId),
+        assigned_staff_id: !isClient && form.assigned_staff_id
+          ? Number(form.assigned_staff_id)
+          : null,
         total_floor_area: Number(form.total_floor_area || 0),
         num_storeys: Number(form.num_storeys || 1),
       });
       setModal(null);
-      load();
+      setViewSuccess('');
+      await load(true);
     } catch (err) {
       setError(err.message);
     }
   };
 
-  const handleUpdateStatus = async (permitId, newStatus) => {
+  const runAction = async (action, successMessage) => {
+    setActionLoading(true);
+    setViewError('');
+    setViewSuccess('');
     try {
-      await api.updatePermit(permitId, { status: newStatus });
-      load();
-      if (selectedPermit?.id === permitId) {
-        setSelectedPermit(await api.getPermit(permitId));
+      await action();
+      await load(true);
+      await refreshSelected();
+      setViewSuccess(successMessage);
+    } catch (err) {
+      setViewError(err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleRequirementToggle = async (permitId, reqId, newStatus) => {
+    try {
+      await api.updateRequirement(permitId, reqId, newStatus);
+      await refreshSelected(permitId);
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const openDecision = (kind) => {
+    setDecision(kind);
+    setDecisionRemarks('');
+    setDecisionError('');
+  };
+
+  const submitDecision = async () => {
+    if (decision === 'reject' && !decisionRemarks.trim()) {
+      setDecisionError('Rejection remarks are required.');
+      return;
+    }
+    setActionLoading(true);
+    setDecisionError('');
+    try {
+      if (decision === 'approve') {
+        await api.approvePermit(selectedPermit.id, decisionRemarks.trim());
+      } else {
+        await api.rejectPermit(selectedPermit.id, decisionRemarks.trim());
       }
+      setDecision(null);
+      await load(true);
+      await refreshSelected();
+      setViewSuccess(decision === 'approve'
+        ? 'Application approved. The Cashier can now process the payment.'
+        : 'Application rejected. The client has been notified.');
+    } catch (err) {
+      setDecisionError(err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const openReceipt = async (paymentId) => {
+    try {
+      setReceiptData(await api.getReceipt(paymentId));
     } catch (err) {
       alert(err.message);
     }
   };
 
-  const handleApprove = async (permitId) => {
-    try {
-      await api.approvePermit(permitId);
-      load();
-      setSelectedPermit(await api.getPermit(permitId));
-    } catch (err) {
-      alert(err.message);
-    }
-  };
-
-  const handleRelease = async (permitId) => {
-    try {
-      await api.releasePermit(permitId);
-      load();
-      setSelectedPermit(await api.getPermit(permitId));
-    } catch (err) {
-      alert(err.message);
-    }
-  };
+  const currentStatusIndex = selectedPermit ? STATUS_FLOW.indexOf(selectedPermit.status) : -1;
 
   return (
     <div>
-      <h1 className="page-title">Permit Applications</h1>
-      <p className="page-subtitle">Process permit requests and track requirements</p>
+      <h1 className="page-title">{isClient ? 'My Permit Applications' : 'Permit Applications'}</h1>
+      <p className="page-subtitle">
+        {isClient
+          ? 'Submit applications, upload requirements and track their status'
+          : 'Process permit requests, review documents and track approvals'}
+      </p>
+
+      {error && <div className="login-error">{error}</div>}
 
       <div className="toolbar">
         <div className="toolbar-left">
@@ -148,7 +254,7 @@ export default function Permits() {
             placeholder="All Types"
             options={[
               { value: '', label: 'All Types' },
-              ...Object.entries(PERMIT_TYPES).map(([k, v]) => ({ value: k, label: v }))
+              ...Object.entries(PERMIT_TYPES).map(([k, v]) => ({ value: k, label: v })),
             ]}
           />
           <CustomSelect
@@ -157,7 +263,7 @@ export default function Permits() {
             placeholder="All Status"
             options={[
               { value: '', label: 'All Status' },
-              ...Object.entries(STATUS_LABELS).map(([k, v]) => ({ value: k, label: v }))
+              ...Object.entries(STATUS_LABELS).map(([k, v]) => ({ value: k, label: v })),
             ]}
           />
         </div>
@@ -178,7 +284,7 @@ export default function Permits() {
                   <th>Status</th>
                   <th>Fee</th>
                   <th>Paid</th>
-                  <th>Assigned Staff</th>
+                  <th>Documents</th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -190,13 +296,22 @@ export default function Permits() {
                     <td>{p.application_no}</td>
                     <td>{p.client_name}</td>
                     <td>{PERMIT_TYPES[p.permit_type] || p.permit_type}</td>
-                    <td><span className={`badge badge-${p.status}`}>{STATUS_LABELS[p.status]}</span></td>
+                    <td>
+                      <span className={`badge badge-${p.status}`}>{STATUS_LABELS[p.status] || p.status}</span>
+                      {p.resubmission_count > 0 && (
+                        <span className="badge badge-requires_resubmission" style={{ marginLeft: 4 }}>
+                          {p.resubmission_count} to resubmit
+                        </span>
+                      )}
+                    </td>
                     <td>{formatCurrency(p.total_fee)}</td>
                     <td>{formatCurrency(p.amount_paid)}</td>
-                    <td>{p.assigned_staff_name || '-'}</td>
+                    <td>{p.document_count || 0}</td>
                     <td style={{ display: 'flex', gap: 4 }}>
                       <button className="btn-icon" onClick={() => openView(p)} title="View"><Icon name="view" size={16} /></button>
-                      <button className="btn-icon" onClick={() => openPreview(p)} title="Preview"><Icon name="print" size={16} /></button>
+                      {!isClient && (
+                        <button className="btn-icon" onClick={() => openPreview(p)} title="Preview"><Icon name="print" size={16} /></button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -255,16 +370,23 @@ export default function Permits() {
                 />
               </div>
             </div>
-            <div className="form-group">
-              <label>Client</label>
-              <CustomSelect
-                value={form.client_id}
-                onChange={(val) => setForm({ ...form, client_id: val })}
-                placeholder="Select client"
-                options={clients.map((c) => ({ value: c.id, label: `${c.client_id} - ${c.full_name}` }))}
-                style={{ width: '100%' }}
-              />
-            </div>
+            {isClient ? (
+              <div className="form-group">
+                <label>Applicant</label>
+                <input className="form-control" value={myClient ? `${myClient.client_id} - ${myClient.full_name}` : 'Loading your profile...'} readOnly />
+              </div>
+            ) : (
+              <div className="form-group">
+                <label>Client</label>
+                <CustomSelect
+                  value={form.client_id}
+                  onChange={(val) => setForm({ ...form, client_id: val })}
+                  placeholder="Select client"
+                  options={clients.map((c) => ({ value: c.id, label: `${c.client_id} - ${c.full_name}` }))}
+                  style={{ width: '100%' }}
+                />
+              </div>
+            )}
             <div className="form-group">
               <label>Project Location</label>
               <input className="form-control" value={form.project_location} onChange={(e) => setForm({ ...form, project_location: e.target.value })} />
@@ -278,16 +400,18 @@ export default function Permits() {
                 <label>Building Type</label>
                 <input className="form-control" value={form.building_type} onChange={(e) => setForm({ ...form, building_type: e.target.value })} />
               </div>
-              <div className="form-group">
-                <label>Assigned Staff</label>
-                <CustomSelect
-                  value={form.assigned_staff_id}
-                  onChange={(val) => setForm({ ...form, assigned_staff_id: val })}
-                  placeholder="Unassigned"
-                  options={staff.map((s) => ({ value: s.id, label: s.full_name }))}
-                  style={{ width: '100%' }}
-                />
-              </div>
+              {!isClient && (
+                <div className="form-group">
+                  <label>Assigned Staff</label>
+                  <CustomSelect
+                    value={form.assigned_staff_id}
+                    onChange={(val) => setForm({ ...form, assigned_staff_id: val })}
+                    placeholder="Unassigned"
+                    options={staff.map((s) => ({ value: s.id, label: s.full_name }))}
+                    style={{ width: '100%' }}
+                  />
+                </div>
+              )}
             </div>
           </>
         )}
@@ -295,7 +419,7 @@ export default function Permits() {
         {step === 1 && (
           <div className="card">
             <div className="card-body">
-              <p style={{ marginBottom: 12 }}>Required documents for <strong>{PERMIT_TYPES[form.permit_type]}</strong> will be created automatically upon submission.</p>
+              <p style={{ marginBottom: 12 }}>Required documents for <strong>{PERMIT_TYPES[form.permit_type]}</strong> will be created automatically upon submission. You can upload the PDF files after submitting.</p>
               <ul style={{ paddingLeft: 20 }}>
                 {(form.permit_type === 'building'
                   ? ['Certified True Copy of Title', 'Tax Declaration', 'Building Plans (Signed & Sealed)', 'Bill of Materials', 'Barangay Clearance', 'Occupancy Permit Application']
@@ -325,7 +449,7 @@ export default function Permits() {
                   <input className="form-control" type="number" value={form.num_storeys} onChange={(e) => setForm({ ...form, num_storeys: e.target.value })} />
                 </div>
               </div>
-              <p>Permit fees are calculated from system settings and will be ready for cashier processing after submission.</p>
+              <p>Permit fees are calculated from system settings. Payment is only enabled after the Municipal Engineer approves the application.</p>
             </div>
           </div>
         )}
@@ -333,7 +457,10 @@ export default function Permits() {
         {step === 3 && (
           <div className="card">
             <div className="card-body">
-              <div className="form-group"><label>Selected Client</label><p>{selectedClient ? `${selectedClient.client_id} - ${selectedClient.full_name}` : 'No client selected'}</p></div>
+              <div className="form-group">
+                <label>Selected Client</label>
+                <p>{selectedClient ? `${selectedClient.client_id} - ${selectedClient.full_name}` : (myClient ? `${myClient.client_id} - ${myClient.full_name}` : 'No client selected')}</p>
+              </div>
               <div className="form-group"><label>Permit Type</label><p>{PERMIT_TYPES[form.permit_type]}</p></div>
               <div className="form-group"><label>Project Location</label><p>{form.project_location || '-'}</p></div>
               <div className="form-group">
@@ -353,105 +480,244 @@ export default function Permits() {
         footer={selectedPermit && (
           <>
             <button className="btn btn-secondary" onClick={() => setModal(null)}>Close</button>
-            {selectedPermit.status === 'submitted' && <button className="btn btn-secondary" onClick={() => handleUpdateStatus(selectedPermit.id, 'for_review')}>Mark For Review</button>}
-            {selectedPermit.status === 'for_review' && <button className="btn btn-secondary" onClick={() => handleUpdateStatus(selectedPermit.id, 'for_payment')}>Mark For Payment</button>}
-            {selectedPermit.status === 'for_approval' && <button className="btn btn-success" onClick={() => handleApprove(selectedPermit.id)}>Approve</button>}
-            {selectedPermit.status === 'approved' && <button className="btn btn-primary" onClick={() => handleRelease(selectedPermit.id)}>Release</button>}
+            {isStaff && selectedPermit.status === 'submitted' && (
+              <button className="btn btn-secondary" disabled={actionLoading}
+                onClick={() => runAction(() => api.reviewPermit(selectedPermit.id), 'Application marked under review.')}>
+                Mark Under Review
+              </button>
+            )}
+            {isStaff && selectedPermit.status === 'for_review' && (
+              <button className="btn btn-primary" disabled={actionLoading}
+                onClick={() => runAction(() => api.forwardPermit(selectedPermit.id), 'Application forwarded to the Municipal Engineer.')}>
+                Forward to Engineer
+              </button>
+            )}
+            {isEngineer && selectedPermit.status === 'for_approval' && (
+              <>
+                <button className="btn btn-danger" disabled={actionLoading} onClick={() => openDecision('reject')}>Reject</button>
+                <button className="btn btn-success" disabled={actionLoading} onClick={() => openDecision('approve')}>Approve</button>
+              </>
+            )}
+            {isStaff && selectedPermit.status === 'paid' && (
+              <button className="btn btn-primary" disabled={actionLoading}
+                onClick={() => runAction(() => api.releasePermit(selectedPermit.id), 'Permit released to the client.')}>
+                Release Permit
+              </button>
+            )}
           </>
         )}
       >
         {selectedPermit && (
-          <div className="form-row">
-            <div>
-              <div className="card" style={{ marginBottom: 16 }}>
-                <div className="card-header"><h3>Application Details</h3></div>
-                <div className="card-body">
-                  <div className="doc-field"><span className="label">Application No.</span><span>{selectedPermit.application_no}</span></div>
-                  <div className="doc-field"><span className="label">Client</span><span>{selectedPermit.client_name}</span></div>
-                  <div className="doc-field"><span className="label">Permit Type</span><span>{PERMIT_TYPES[selectedPermit.permit_type]}</span></div>
-                  <div className="doc-field"><span className="label">Application Date</span><span>{formatDate(selectedPermit.application_date)}</span></div>
-                  <div className="doc-field"><span className="label">Project Location</span><span>{selectedPermit.project_location || '-'}</span></div>
-                  <div className="doc-field"><span className="label">Assigned Staff</span><span>{selectedPermit.assigned_staff_name || '-'}</span></div>
-                  <div className="doc-field"><span className="label">Status</span><span><span className={`badge badge-${selectedPermit.status}`}>{STATUS_LABELS[selectedPermit.status]}</span></span></div>
-                  <div className="doc-field"><span className="label">Total Fee</span><span>{formatCurrency(selectedPermit.total_fee)}</span></div>
-                  <div className="doc-field"><span className="label">Amount Paid</span><span>{formatCurrency(selectedPermit.amount_paid)}</span></div>
-                </div>
+          <>
+            {viewError && <div className="login-error">{viewError}</div>}
+            {viewSuccess && <div className="badge badge-active" style={{ display: 'inline-block', marginBottom: 12 }}>{viewSuccess}</div>}
+            {selectedPermit.status === 'rejected' && (
+              <div className="login-error">
+                Application rejected. Reason: {selectedPermit.rejection_reason || 'No remarks provided.'}
               </div>
-              <div className="card">
-                <div className="card-header"><h3>Requirements Checklist</h3></div>
-                <div className="table-wrap">
-                  <table>
-                    <thead><tr><th>Requirement</th><th>Status</th><th>Action</th></tr></thead>
-                    <tbody>
-                      {selectedPermit.requirements?.map((r) => (
-                        <tr key={r.id}>
-                          <td>{r.requirement_name}</td>
-                          <td><span className={`badge badge-${r.status}`}>{r.status}</span></td>
-                          <td>
-                            <select
-                              className="form-control"
-                              value={r.status}
-                              onChange={(e) => handleRequirementToggle(selectedPermit.id, r.id, e.target.value)}
-                            >
-                              <option value="pending">Pending</option>
-                              <option value="submitted">Submitted</option>
-                            </select>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+            )}
+
+            <div className="form-row">
+              <div>
+                <div className="card" style={{ marginBottom: 16 }}>
+                  <div className="card-header"><h3>Application Details</h3></div>
+                  <div className="card-body">
+                    <div className="doc-field"><span className="label">Application No.</span><span>{selectedPermit.application_no}</span></div>
+                    <div className="doc-field"><span className="label">Client</span><span>{selectedPermit.client_name}</span></div>
+                    <div className="doc-field"><span className="label">Permit Type</span><span>{PERMIT_TYPES[selectedPermit.permit_type]}</span></div>
+                    <div className="doc-field"><span className="label">Application Date</span><span>{formatDate(selectedPermit.application_date)}</span></div>
+                    <div className="doc-field"><span className="label">Project Location</span><span>{selectedPermit.project_location || '-'}</span></div>
+                    <div className="doc-field"><span className="label">Assigned Staff</span><span>{selectedPermit.assigned_staff_name || '-'}</span></div>
+                    <div className="doc-field"><span className="label">Status</span><span><span className={`badge badge-${selectedPermit.status}`}>{STATUS_LABELS[selectedPermit.status] || selectedPermit.status}</span></span></div>
+                    <div className="doc-field"><span className="label">Total Fee</span><span>{formatCurrency(selectedPermit.total_fee)}</span></div>
+                    <div className="doc-field"><span className="label">Amount Paid</span><span>{formatCurrency(selectedPermit.amount_paid)}</span></div>
+                    {selectedPermit.approved_by_name && (
+                      <div className="doc-field"><span className="label">Approved By</span><span>{selectedPermit.approved_by_name}</span></div>
+                    )}
+                    {selectedPermit.approved_at && (
+                      <div className="doc-field"><span className="label">Approved At</span><span>{formatDateTime(selectedPermit.approved_at)}</span></div>
+                    )}
+                  </div>
                 </div>
+
+                <div className="card" style={{ marginBottom: 16 }}>
+                  <div className="card-header"><h3>Requirements Checklist</h3></div>
+                  <div className="table-wrap">
+                    <table>
+                      <thead><tr><th>Requirement</th><th>Status</th><th>Action</th></tr></thead>
+                      <tbody>
+                        {selectedPermit.requirements?.map((r) => (
+                          <tr key={r.id}>
+                            <td>{r.requirement_name}</td>
+                            <td><span className={`badge badge-${r.status}`}>{r.status}</span></td>
+                            <td>
+                              {canReviewDocuments ? (
+                                <select
+                                  className="form-control"
+                                  value={r.status}
+                                  onChange={(e) => handleRequirementToggle(selectedPermit.id, r.id, e.target.value)}
+                                >
+                                  <option value="pending">Pending</option>
+                                  <option value="submitted">Submitted</option>
+                                </select>
+                              ) : (
+                                <span>{r.status === 'submitted' ? 'Submitted' : 'Pending'}</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <DocumentsPanel
+                  permit={selectedPermit}
+                  user={user}
+                  onChanged={() => refreshSelected()}
+                />
               </div>
-            </div>
-            <div>
-              <div className="card">
-                <div className="card-header"><h3>Application Status</h3></div>
-                <div className="card-body">
-                  <div className="status-tracker">
-                    {statusOrder.map((s, index) => {
-                      const currentIndex = statusOrder.indexOf(selectedPermit.status);
-                      const stateClass = index < currentIndex ? 'done' : index === currentIndex ? 'current' : '';
-                      return (
-                        <div key={s}>
-                          <div className={`status-step ${stateClass}`}>
-                            <div className="status-dot" />
-                            <div>
-                              <strong>{STATUS_LABELS[s]}</strong>
-                              <div style={{ fontSize: 12, color: 'var(--green-800)' }}>{index <= currentIndex ? 'Reached' : 'Pending'}</div>
-                            </div>
-                          </div>
-                          {index < statusOrder.length - 1 && <div className="status-line" />}
+
+              <div>
+                <div className="card" style={{ marginBottom: 16 }}>
+                  <div className="card-header"><h3>Application Status</h3></div>
+                  <div className="card-body">
+                    {selectedPermit.status === 'rejected' ? (
+                      <div className="status-step current">
+                        <div className="status-dot" />
+                        <div>
+                          <strong>Rejected</strong>
+                          <div style={{ fontSize: 12, color: 'var(--red-800)' }}>{selectedPermit.rejection_reason || 'No remarks'}</div>
                         </div>
-                      );
-                    })}
+                      </div>
+                    ) : (
+                      <div className="status-tracker">
+                        {STATUS_FLOW.map((s, index) => {
+                          const currentIndex = currentStatusIndex >= 0 ? currentStatusIndex : 0;
+                          const stateClass = index < currentIndex ? 'done' : index === currentIndex ? 'current' : '';
+                          return (
+                            <div key={s}>
+                              <div className={`status-step ${stateClass}`}>
+                                <div className="status-dot" />
+                                <div>
+                                  <strong>{STATUS_LABELS[s]}</strong>
+                                  <div style={{ fontSize: 12, color: 'var(--green-800)' }}>
+                                    {index <= currentIndex ? 'Reached' : 'Pending'}
+                                  </div>
+                                </div>
+                              </div>
+                              {index < STATUS_FLOW.length - 1 && <div className="status-line" />}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="card" style={{ marginBottom: 16 }}>
+                  <div className="card-header"><h3>Approval History</h3></div>
+                  <div className="card-body">
+                    {selectedPermit.approvals?.length ? selectedPermit.approvals.map((approval) => (
+                      <div key={approval.id} className="approval-record">
+                        <div>
+                          <span className={`badge badge-${approval.decision === 'approved' ? 'approved' : 'rejected'}`}>
+                            {approval.decision === 'approved' ? 'Approved' : 'Rejected'}
+                          </span>
+                          <strong style={{ marginLeft: 8 }}>{approval.engineer_name || 'Municipal Engineer'}</strong>
+                        </div>
+                        <div className="doc-meta">{formatDateTime(approval.created_at)}</div>
+                        {approval.remarks && <div className="approval-remarks">{approval.remarks}</div>}
+                      </div>
+                    )) : <p className="page-subtitle">No engineer decision recorded yet.</p>}
+                  </div>
+                </div>
+
+                <div className="card">
+                  <div className="card-header"><h3>Payments</h3></div>
+                  <div className="card-body">
+                    {selectedPermit.payments?.length ? selectedPermit.payments.map((payment) => (
+                      <div key={payment.id} className="payment-record">
+                        <div>
+                          <strong>{payment.or_number}</strong>
+                          <div className="doc-meta">{formatDateTime(payment.payment_date)} · {payment.cashier_name || '-'}</div>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <strong>{formatCurrency(payment.amount)}</strong>
+                          <button className="btn-icon" title="View / Print Receipt" onClick={() => openReceipt(payment.id)}>
+                            <Icon name="print" size={16} />
+                          </button>
+                        </div>
+                      </div>
+                    )) : <p className="page-subtitle">No payment recorded yet.</p>}
                   </div>
                 </div>
               </div>
             </div>
+          </>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!decision}
+        onClose={() => setDecision(null)}
+        title={decision === 'approve' ? 'Approve Application' : 'Reject Application'}
+        footer={
+          <>
+            <button className="btn btn-secondary" onClick={() => setDecision(null)}>Cancel</button>
+            <button
+              className={`btn ${decision === 'approve' ? 'btn-success' : 'btn-danger'}`}
+              onClick={submitDecision}
+              disabled={actionLoading}
+            >
+              {actionLoading ? 'Saving...' : (decision === 'approve' ? 'Confirm Approval' : 'Confirm Rejection')}
+            </button>
+          </>
+        }
+      >
+        {decisionError && <div className="login-error">{decisionError}</div>}
+        <p style={{ marginBottom: 12 }}>
+          {decision === 'approve'
+            ? 'The application status will be updated to Approved and the Cashier will be allowed to process payment.'
+            : 'The application status will be updated to Rejected and the client will be notified.'}
+        </p>
+        <div className="form-group">
+          <label>Remarks {decision === 'reject' ? '*' : '(optional)'}</label>
+          <textarea
+            className="form-control"
+            rows={4}
+            value={decisionRemarks}
+            onChange={(e) => setDecisionRemarks(e.target.value)}
+            placeholder={decision === 'reject'
+              ? 'Explain why the application is rejected...'
+              : 'Optional approval remarks...'}
+          />
+        </div>
+      </Modal>
+
+      <Modal open={modal === 'preview'} onClose={() => setModal(null)} title="Printable Permit Preview" large>
+        {previewData && (
+          <div className="permit-document">
+            <div className="doc-header">
+              <h2>{previewData.office.office_name}</h2>
+              <div>{previewData.office.municipality}</div>
+              <div style={{ marginTop: 8, fontWeight: 700 }}>BUILDING PERMIT</div>
+            </div>
+            <div className="doc-field"><span className="label">Application No.</span><span>{previewData.permit.application_no}</span></div>
+            <div className="doc-field"><span className="label">Client Name</span><span>{previewData.permit.client_name}</span></div>
+            <div className="doc-field"><span className="label">Address</span><span>{previewData.permit.client_address}</span></div>
+            <div className="doc-field"><span className="label">Project Location</span><span>{previewData.permit.project_location}</span></div>
+            <div className="doc-field"><span className="label">Nature of Construction</span><span>{previewData.permit.nature_of_construction}</span></div>
+            <div className="doc-field"><span className="label">Permit Type</span><span>{PERMIT_TYPES[previewData.permit.permit_type]}</span></div>
+            <div className="doc-field"><span className="label">Issued Date</span><span>{formatDate(previewData.permit.issued_date)}</span></div>
+            <div className="qr"><img src={previewData.qrCode} alt="QR Code" style={{ width: 130, height: 130 }} /></div>
+            <div className="signature">{previewData.office.municipal_engineer}<br />Municipal Engineer</div>
           </div>
         )}
       </Modal>
 
-      <Modal open={modal === 'preview'} onClose={() => setModal(null)} title="Printable Permit Preview" large>
-        {selectedPermit && (
-          <div className="permit-document">
-            <div className="doc-header">
-              <h2>{selectedPermit.office.office_name}</h2>
-              <div>{selectedPermit.office.municipality}</div>
-              <div style={{ marginTop: 8, fontWeight: 700 }}>BUILDING PERMIT</div>
-            </div>
-            <div className="doc-field"><span className="label">Application No.</span><span>{selectedPermit.permit.application_no}</span></div>
-            <div className="doc-field"><span className="label">Client Name</span><span>{selectedPermit.permit.client_name}</span></div>
-            <div className="doc-field"><span className="label">Address</span><span>{selectedPermit.permit.client_address}</span></div>
-            <div className="doc-field"><span className="label">Project Location</span><span>{selectedPermit.permit.project_location}</span></div>
-            <div className="doc-field"><span className="label">Nature of Construction</span><span>{selectedPermit.permit.nature_of_construction}</span></div>
-            <div className="doc-field"><span className="label">Permit Type</span><span>{PERMIT_TYPES[selectedPermit.permit.permit_type]}</span></div>
-            <div className="doc-field"><span className="label">Issued Date</span><span>{formatDate(selectedPermit.permit.issued_date)}</span></div>
-            <div className="qr"><img src={selectedPermit.qrCode} alt="QR Code" style={{ width: 130, height: 130 }} /></div>
-            <div className="signature">{selectedPermit.office.municipal_engineer}<br />Municipal Engineer</div>
-          </div>
-        )}
+      <Modal open={!!receiptData} onClose={() => setReceiptData(null)} title="Official Receipt" large>
+        {receiptData && <Receipt data={receiptData} />}
       </Modal>
     </div>
   );

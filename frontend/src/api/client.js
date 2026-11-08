@@ -1,13 +1,27 @@
-const API_BASE = '/api';
+const API_BASE = import.meta.env.VITE_API_BASE || '/api';
 
 async function request(endpoint, options = {}) {
   const token = localStorage.getItem('token');
-  const headers = { 'Content-Type': 'application/json', ...options.headers };
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+  const headers = { ...options.headers };
+  if (!isFormData && options.body !== undefined) headers['Content-Type'] = 'application/json';
   if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(`${API_BASE}${endpoint}`, { ...options, headers });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'Request failed');
   return data;
+}
+
+async function requestBlob(endpoint) {
+  const token = localStorage.getItem('token');
+  const res = await fetch(`${API_BASE}${endpoint}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Unable to load file');
+  }
+  return res.blob();
 }
 
 export const api = {
@@ -24,6 +38,7 @@ export const api = {
   getRecentActivities: () => request('/dashboard/recent-activities'),
 
   getClients: (params) => request(`/clients?${new URLSearchParams(params)}`),
+  getMyClient: () => request('/clients/me'),
   getClient: (id) => request(`/clients/${id}`),
   createClient: (data) => request('/clients', { method: 'POST', body: JSON.stringify(data) }),
   updateClient: (id, data) => request(`/clients/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
@@ -35,10 +50,27 @@ export const api = {
   updatePermit: (id, data) => request(`/permits/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   updateRequirement: (permitId, reqId, status) =>
     request(`/permits/${permitId}/requirements/${reqId}`, { method: 'PUT', body: JSON.stringify({ status }) }),
-  approvePermit: (id) => request(`/permits/${id}/approve`, { method: 'POST' }),
+  reviewPermit: (id) => request(`/permits/${id}/review`, { method: 'POST' }),
+  forwardPermit: (id) => request(`/permits/${id}/forward`, { method: 'POST' }),
+  approvePermit: (id, remarks = '') =>
+    request(`/permits/${id}/approve`, { method: 'POST', body: JSON.stringify({ remarks }) }),
+  rejectPermit: (id, remarks) =>
+    request(`/permits/${id}/reject`, { method: 'POST', body: JSON.stringify({ remarks }) }),
   releasePermit: (id) => request(`/permits/${id}/release`, { method: 'POST' }),
 
+  getPermitDocuments: (permitId) => request(`/documents/permit/${permitId}`),
+  uploadDocument: (permitId, formData) =>
+    request(`/documents/permit/${permitId}`, { method: 'POST', body: formData }),
+  replaceDocument: (documentId, formData) =>
+    request(`/documents/${documentId}/replace`, { method: 'POST', body: formData }),
+  updateDocumentStatus: (documentId, status, remarks = '') =>
+    request(`/documents/${documentId}/status`, { method: 'PUT', body: JSON.stringify({ status, remarks }) }),
+  getDocumentBlob: (documentId, download = false) =>
+    requestBlob(`/documents/${documentId}/file${download ? '?download=1' : ''}`),
+  getDocumentRecords: (params) => request(`/documents/records?${new URLSearchParams(params)}`),
+
   getPayments: (params) => request(`/payments?${new URLSearchParams(params)}`),
+  getPendingPayments: () => request('/payments/pending'),
   getPermitPayments: (permitId) => request(`/payments/permit/${permitId}`),
   createPayment: (data) => request('/payments', { method: 'POST', body: JSON.stringify(data) }),
   getReceipt: (id) => request(`/payments/${id}/receipt`),

@@ -1,12 +1,14 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 const os = require('os');
 const db = require('./database/db');
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const clientRoutes = require('./routes/clients');
 const permitRoutes = require('./routes/permits');
+const documentRoutes = require('./routes/documents');
 const paymentRoutes = require('./routes/payments');
 const dashboardRoutes = require('./routes/dashboard');
 const reportRoutes = require('./routes/reports');
@@ -19,7 +21,7 @@ const PORT = process.env.PORT || 3001;
 const HOST = process.env.HOST || '0.0.0.0';
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -31,6 +33,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/audit', auditRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/documents', documentRoutes);
 
 function lanAddresses() {
   const ips = [];
@@ -44,12 +47,30 @@ function lanAddresses() {
 }
 
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', lan_ips: lanAddresses(), port: PORT });
+  let database = 'ok';
+  try { db.prepare('SELECT 1').get(); } catch { database = 'error'; }
+  res.json({ status: 'ok', database, lan_ips: lanAddresses(), port: PORT });
 });
+
+/**
+ * Optional single-port deployment: after `npm run build` in the frontend the
+ * Express server also serves the compiled React app. This is convenient for
+ * LAN use (one URL for every laptop) and for an online server behind a reverse
+ * proxy. In development Vite keeps serving the frontend on port 5173.
+ */
+const distDir = path.join(__dirname, '..', 'frontend', 'dist');
+if (fs.existsSync(path.join(distDir, 'index.html'))) {
+  app.use(express.static(distDir));
+  app.get(/^(?!\/api(?:\/|$)).*/, (req, res) => {
+    res.sendFile(path.join(distDir, 'index.html'));
+  });
+}
 
 app.use((err, req, res, next) => {
   console.error(err);
-  res.status(500).json({ error: 'Internal server error' });
+  if (res.headersSent) return next(err);
+  const status = err.status || err.statusCode || 500;
+  res.status(status).json({ error: status === 500 ? 'Internal server error' : err.message });
 });
 
 // ./database/db provisions the schema and seed data automatically when it is

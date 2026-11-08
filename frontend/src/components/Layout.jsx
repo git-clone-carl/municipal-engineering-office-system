@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Icon } from './UI';
+import { api } from '../api/client';
+import { Icon, timeAgo } from './UI';
 
 const NAV_ITEMS = [
   { path: '/', label: 'Dashboard', icon: 'dashboard', module: 'dashboard' },
@@ -21,19 +22,62 @@ export default function Layout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [datetime, setDatetime] = useState(new Date());
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [unread, setUnread] = useState(0);
 
   useEffect(() => {
     const timer = setInterval(() => setDatetime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    const loadNotifications = async () => {
+      try {
+        const data = await api.getNotifications();
+        if (!active) return;
+        setNotifications(data.notifications || []);
+        setUnread(data.unread || 0);
+      } catch {
+        /* notification polling is best-effort */
+      }
+    };
+    loadNotifications();
+    const timer = setInterval(loadNotifications, 20000);
+    return () => { active = false; clearInterval(timer); };
+  }, []);
+
   const handleLogout = () => {
     setShowUserMenu(false);
+    setShowNotifications(false);
     logout();
     navigate('/login');
   };
 
-  const visibleNav = NAV_ITEMS.filter((item) => hasAccess(item.module));
+  const markRead = async (notification) => {
+    if (!notification.is_read) {
+      try {
+        await api.markNotificationRead(notification.id);
+        setNotifications((rows) => rows.map((n) => n.id === notification.id ? { ...n, is_read: 1 } : n));
+        setUnread((count) => Math.max(0, count - 1));
+      } catch { /* ignore */ }
+    }
+  };
+
+  const markAllRead = async () => {
+    try {
+      await api.markAllNotificationsRead();
+      setNotifications((rows) => rows.map((n) => ({ ...n, is_read: 1 })));
+      setUnread(0);
+    } catch { /* ignore */ }
+  };
+
+  const visibleNav = NAV_ITEMS
+    .filter((item) => hasAccess(item.module))
+    .map((item) => (user?.role === 'viewer' && item.path === '/permits'
+      ? { ...item, label: 'My Applications' }
+      : item));
 
   return (
     <div className="app-layout">
@@ -88,6 +132,46 @@ export default function Layout() {
             <span className="datetime">
               {datetime.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' })}
             </span>
+
+            {/* Notifications (database-backed, polled so other laptops' actions appear) */}
+            <div className="notification-wrap">
+              <button
+                type="button"
+                className="notification-bell"
+                title="Notifications"
+                onClick={() => setShowNotifications((open) => !open)}
+              >
+                <Icon name="bell" size={19} />
+                {unread > 0 && <span className="notification-count">{unread > 99 ? '99+' : unread}</span>}
+              </button>
+
+              {showNotifications && (
+                <div className="notification-dropdown">
+                  <div className="notification-header">
+                    <strong>Notifications</strong>
+                    <button type="button" className="notification-mark-all" onClick={markAllRead}>
+                      Mark all read
+                    </button>
+                  </div>
+                  <div className="notification-list">
+                    {notifications.length === 0 ? (
+                      <div className="empty-state" style={{ padding: 20 }}>No notifications yet.</div>
+                    ) : notifications.map((notification) => (
+                      <button
+                        type="button"
+                        key={notification.id}
+                        className={`notification-item ${notification.is_read ? '' : 'unread'} type-${notification.type || 'info'}`}
+                        onClick={() => markRead(notification)}
+                      >
+                        <div className="notification-item-title">{notification.title}</div>
+                        <div className="notification-item-message">{notification.message}</div>
+                        <div className="notification-item-time">{timeAgo(notification.created_at)}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* Clickable User Account Profile Pill with Anonymous Character Icon & Logout Dropdown */}
             <div style={{ position: 'relative' }}>

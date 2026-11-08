@@ -19,7 +19,10 @@ router.get('/', authenticate, (req, res) => {
 });
 
 router.put('/:id/read', authenticate, (req, res) => {
-  db.prepare('UPDATE notifications SET is_read = 1 WHERE id = ?').run(req.params.id);
+  db.prepare(`
+    UPDATE notifications SET is_read = 1
+    WHERE id = ? AND (user_id IS NULL OR user_id = ?)
+  `).run(req.params.id, req.user.id);
   res.json({ success: true });
 });
 

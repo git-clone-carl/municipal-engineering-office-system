@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../database/db');
 const { authenticate } = require('../middleware/auth');
 const { checkPermission, logAudit, getClientIp } = require('../middleware/rbac');
+const { ensureClientForUser } = require('../middleware/access');
 
 const router = express.Router();
 
@@ -26,6 +27,17 @@ router.get('/', authenticate, checkPermission('clients'), (req, res) => {
     SELECT * FROM clients WHERE ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?
   `).all(...params, Number(limit), Number(offset));
   res.json({ clients, total, page: Number(page), limit: Number(limit) });
+});
+
+/**
+ * The linked profile for the signed-in Client account. Available even though
+ * viewers do not have access to the full client-management module.
+ */
+router.get('/me', authenticate, (req, res) => {
+  if (req.user.role !== 'viewer') {
+    return res.status(400).json({ error: 'Only client accounts have a linked client profile' });
+  }
+  res.json(ensureClientForUser(req.user));
 });
 
 router.get('/:id', authenticate, checkPermission('clients'), (req, res) => {

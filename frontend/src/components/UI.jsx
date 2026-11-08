@@ -21,6 +21,15 @@ export function Icon({ name, size = 18 }) {
     view: <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" fill="currentColor" />,
     print: <path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z" fill="currentColor" />,
     calendar: <path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10zm0-12H5V6h14v2zm-7 5h5v5h-5z" fill="currentColor" />,
+    upload: <path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z" fill="currentColor" />,
+    download: <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" fill="currentColor" />,
+    file: <path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z" fill="currentColor" />,
+    check: <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" fill="currentColor" />,
+    warn: <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z" fill="currentColor" />,
+    zoomIn: <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zM9.5 14C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14zm-1-5h2v2h2v-2h-2V7h-2v2H6.5v2h2v-2z" fill="currentColor" />,
+    zoomOut: <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zM9.5 14C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14zM7 9h5v2H7z" fill="currentColor" />,
+    fullscreen: <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" fill="currentColor" />,
+    refresh: <path d="M17.65 6.35A7.958 7.958 0 0012 4a8 8 0 108 8h-2a6 6 0 11-1.76-4.24L13 11h7V4l-2.35 2.35z" fill="currentColor" />,
   };
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
@@ -338,11 +347,11 @@ export function timeAgo(d) {
 }
 
 export const ROLE_LABELS = {
-  admin: 'System Admin',
+  admin: 'System Administrator',
   municipal_engineer: 'Municipal Engineer',
-  engineering_staff: 'Engineering Staff',
+  engineering_staff: 'WNGR Staff',
   cashier: 'Cashier',
-  viewer: 'Citizen / Viewer',
+  viewer: 'Client',
 };
 
 export const PERMIT_TYPES = {
@@ -359,6 +368,34 @@ export const STATUS_LABELS = {
   for_payment: 'For Payment',
   for_approval: 'For Approval',
   approved: 'Approved',
+  paid: 'Paid',
   released: 'Released',
   rejected: 'Rejected',
 };
+
+export const DOCUMENT_STATUS_LABELS = {
+  pending_review: 'Pending Review',
+  accepted: 'Accepted',
+  rejected: 'Rejected',
+  requires_resubmission: 'Requires Resubmission',
+};
+
+export function formatFileSize(bytes) {
+  const size = Number(bytes || 0);
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+/** Browser-native printing with a receipt-only print layout (see index.css). */
+export function printElement() {
+  document.body.classList.add('print-receipt');
+  const cleanup = () => {
+    document.body.classList.remove('print-receipt');
+    window.removeEventListener('afterprint', cleanup);
+    window.removeEventListener('focus', cleanup);
+  };
+  window.addEventListener('afterprint', cleanup);
+  window.addEventListener('focus', cleanup);
+  window.print();
+}

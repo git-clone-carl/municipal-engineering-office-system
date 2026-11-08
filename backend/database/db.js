@@ -15,7 +15,11 @@ try {
 // The database file is git-ignored on purpose: every computer that installs this
 // project gets its own database, provisioned automatically the first time the
 // API starts (schema + seed data live in ./schema.js).
-const dbPath = path.join(__dirname, 'municipal.db');
+// DB_PATH allows tests / deployments to point at a different central database
+// file without changing code. Defaults to the historical location.
+const dbPath = process.env.DB_PATH
+  ? path.resolve(process.env.DB_PATH)
+  : path.join(__dirname, 'municipal.db');
 fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
 const db = new DatabaseSync(dbPath);

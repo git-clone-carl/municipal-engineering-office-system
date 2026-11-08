@@ -49,11 +49,17 @@ const SCHEMA_SQL = `
     num_storeys INTEGER DEFAULT 1,
     assigned_staff_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     status TEXT NOT NULL DEFAULT 'submitted'
-      CHECK(status IN ('submitted', 'for_review', 'for_payment', 'for_approval', 'approved', 'released', 'rejected')),
+      CHECK(status IN ('submitted', 'for_review', 'for_payment', 'for_approval', 'approved', 'paid', 'released', 'rejected')),
     total_fee REAL DEFAULT 0,
     amount_paid REAL DEFAULT 0,
     notes TEXT,
     issued_date DATE,
+    approved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    approved_at DATETIME,
+    rejected_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    rejected_at DATETIME,
+    rejection_reason TEXT,
+    payment_date DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
@@ -66,6 +72,38 @@ const SCHEMA_SQL = `
     submitted_at DATETIME
   );
 
+  CREATE TABLE IF NOT EXISTS application_documents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_no TEXT UNIQUE,
+    permit_id INTEGER NOT NULL REFERENCES permits(id) ON DELETE CASCADE,
+    client_id INTEGER NOT NULL REFERENCES clients(id),
+    requirement_id INTEGER REFERENCES permit_requirements(id) ON DELETE SET NULL,
+    document_type TEXT NOT NULL DEFAULT 'Supporting Document',
+    original_name TEXT NOT NULL,
+    stored_name TEXT NOT NULL,
+    mime_type TEXT NOT NULL DEFAULT 'application/pdf',
+    file_size INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending_review'
+      CHECK(status IN ('pending_review', 'accepted', 'rejected', 'requires_resubmission')),
+    remarks TEXT,
+    uploaded_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    reviewed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    reviewed_at DATETIME,
+    uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS approval_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    permit_id INTEGER NOT NULL REFERENCES permits(id) ON DELETE CASCADE,
+    engineer_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    decision TEXT NOT NULL CHECK(decision IN ('approved', 'rejected')),
+    remarks TEXT,
+    previous_status TEXT,
+    new_status TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE TABLE IF NOT EXISTS payments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     or_number TEXT UNIQUE NOT NULL,
@@ -75,7 +113,8 @@ const SCHEMA_SQL = `
     payment_method TEXT NOT NULL DEFAULT 'cash',
     cashier_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     notes TEXT,
-    payment_date DATETIME DEFAULT CURRENT_TIMESTAMP
+    payment_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    receipt_printed_at DATETIME
   );
 
   CREATE TABLE IF NOT EXISTS audit_logs (
@@ -101,6 +140,7 @@ const SCHEMA_SQL = `
   CREATE TABLE IF NOT EXISTS notifications (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    permit_id INTEGER REFERENCES permits(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
     message TEXT NOT NULL,
     type TEXT DEFAULT 'info',
@@ -139,6 +179,11 @@ const INDEX_SQL = [
   'CREATE INDEX IF NOT EXISTS idx_payments_payment_date ON payments(payment_date)',
   'CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at)',
   'CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id)',
+  'CREATE INDEX IF NOT EXISTS idx_notifications_permit ON notifications(permit_id)',
+  'CREATE INDEX IF NOT EXISTS idx_documents_permit ON application_documents(permit_id)',
+  'CREATE INDEX IF NOT EXISTS idx_documents_client ON application_documents(client_id)',
+  'CREATE INDEX IF NOT EXISTS idx_documents_status ON application_documents(status)',
+  'CREATE INDEX IF NOT EXISTS idx_approval_records_permit ON approval_records(permit_id)',
 ];
 
 /**
@@ -176,6 +221,12 @@ const ADDITIVE_COLUMNS = {
     amount_paid: 'REAL DEFAULT 0',
     notes: 'TEXT',
     issued_date: 'DATE',
+    approved_by: 'INTEGER REFERENCES users(id)',
+    approved_at: 'DATETIME',
+    rejected_by: 'INTEGER REFERENCES users(id)',
+    rejected_at: 'DATETIME',
+    rejection_reason: 'TEXT',
+    payment_date: 'DATETIME',
     created_at: 'DATETIME',
     updated_at: 'DATETIME',
   },
@@ -191,6 +242,34 @@ const ADDITIVE_COLUMNS = {
     cashier_id: 'INTEGER REFERENCES users(id)',
     notes: 'TEXT',
     payment_date: 'DATETIME',
+    receipt_printed_at: 'DATETIME',
+  },
+  application_documents: {
+    document_no: 'TEXT',
+    permit_id: 'INTEGER REFERENCES permits(id)',
+    client_id: 'INTEGER REFERENCES clients(id)',
+    requirement_id: 'INTEGER REFERENCES permit_requirements(id)',
+    document_type: "TEXT DEFAULT 'Supporting Document'",
+    original_name: 'TEXT',
+    stored_name: 'TEXT',
+    mime_type: "TEXT DEFAULT 'application/pdf'",
+    file_size: 'INTEGER DEFAULT 0',
+    status: "TEXT DEFAULT 'pending_review'",
+    remarks: 'TEXT',
+    uploaded_by: 'INTEGER REFERENCES users(id)',
+    reviewed_by: 'INTEGER REFERENCES users(id)',
+    reviewed_at: 'DATETIME',
+    uploaded_at: 'DATETIME',
+    updated_at: 'DATETIME',
+  },
+  approval_records: {
+    permit_id: 'INTEGER REFERENCES permits(id)',
+    engineer_id: 'INTEGER REFERENCES users(id)',
+    decision: 'TEXT',
+    remarks: 'TEXT',
+    previous_status: 'TEXT',
+    new_status: 'TEXT',
+    created_at: 'DATETIME',
   },
   audit_logs: {
     username: 'TEXT',
@@ -199,6 +278,7 @@ const ADDITIVE_COLUMNS = {
     created_at: 'DATETIME',
   },
   notifications: {
+    permit_id: 'INTEGER REFERENCES permits(id)',
     is_read: 'INTEGER DEFAULT 0',
     type: "TEXT DEFAULT 'info'",
     created_at: 'DATETIME',
@@ -225,6 +305,9 @@ const BACKFILL_SQL = [
   'UPDATE permits SET total_fee = 0 WHERE total_fee IS NULL',
   'UPDATE permits SET amount_paid = 0 WHERE amount_paid IS NULL',
   'UPDATE payments SET payment_date = CURRENT_TIMESTAMP WHERE payment_date IS NULL',
+  'UPDATE application_documents SET uploaded_at = CURRENT_TIMESTAMP WHERE uploaded_at IS NULL',
+  'UPDATE application_documents SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL',
+  'UPDATE approval_records SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL',
   'UPDATE audit_logs SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL',
 ];
 
@@ -232,10 +315,10 @@ const BACKFILL_SQL = [
 // (users, settings and rbac modules are reserved for the System Administrator.)
 const ROLE_MODULES = [
   { module: 'dashboard', admin: 1, engineering_staff: 1, cashier: 1, municipal_engineer: 1, viewer: 1 },
-  { module: 'clients', admin: 1, engineering_staff: 1, cashier: 0, municipal_engineer: 1, viewer: 1 },
-  { module: 'permits', admin: 1, engineering_staff: 1, cashier: 0, municipal_engineer: 1, viewer: 0 },
+  { module: 'clients', admin: 1, engineering_staff: 1, cashier: 0, municipal_engineer: 1, viewer: 0 },
+  { module: 'permits', admin: 1, engineering_staff: 1, cashier: 0, municipal_engineer: 1, viewer: 1 },
   { module: 'payments', admin: 1, engineering_staff: 0, cashier: 1, municipal_engineer: 1, viewer: 0 },
-  { module: 'reports', admin: 1, engineering_staff: 1, cashier: 1, municipal_engineer: 1, viewer: 1 },
+  { module: 'reports', admin: 1, engineering_staff: 1, cashier: 1, municipal_engineer: 1, viewer: 0 },
   { module: 'audit_logs', admin: 1, engineering_staff: 0, cashier: 0, municipal_engineer: 1, viewer: 0 },
   { module: 'users', admin: 1, engineering_staff: 0, cashier: 0, municipal_engineer: 0, viewer: 0 },
   { module: 'settings', admin: 1, engineering_staff: 0, cashier: 0, municipal_engineer: 0, viewer: 0 },
@@ -290,8 +373,9 @@ const DEFAULT_OFFICE = {
 const LEGACY_TABLES = ['permit_applications', 'requirements_checklist'];
 
 const EXPECTED_TABLES = [
-  'users', 'clients', 'permits', 'permit_requirements', 'payments',
-  'audit_logs', 'role_permissions', 'notifications', 'settings', 'office_info',
+  'users', 'clients', 'permits', 'permit_requirements', 'application_documents',
+  'approval_records', 'payments', 'audit_logs', 'role_permissions',
+  'notifications', 'settings', 'office_info',
 ];
 
 function tableExists(db, table) {
@@ -333,6 +417,92 @@ function createIndexes(db) {
     }
   }
   return failed;
+}
+
+/**
+ * SQLite cannot alter a CHECK constraint in place. Older installations only
+ * allow the original status list, so the permits table is rebuilt once to add
+ * the new 'paid' status. Foreign keys are disabled for the swap and the child
+ * tables keep referencing "permits" by name. Existing rows are copied as-is.
+ */
+const PERMITS_MIGRATION_SQL = `
+  CREATE TABLE permits_migrated (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    application_no TEXT UNIQUE NOT NULL,
+    client_id INTEGER NOT NULL REFERENCES clients(id),
+    permit_type TEXT NOT NULL CHECK(permit_type IN ('building', 'electrical', 'occupancy', 'locational', 'certificate')),
+    application_date DATE DEFAULT (date('now')),
+    project_location TEXT,
+    nature_of_construction TEXT,
+    building_type TEXT,
+    total_floor_area REAL DEFAULT 0,
+    num_storeys INTEGER DEFAULT 1,
+    assigned_staff_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    status TEXT NOT NULL DEFAULT 'submitted'
+      CHECK(status IN ('submitted', 'for_review', 'for_payment', 'for_approval', 'approved', 'paid', 'released', 'rejected')),
+    total_fee REAL DEFAULT 0,
+    amount_paid REAL DEFAULT 0,
+    notes TEXT,
+    issued_date DATE,
+    approved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    approved_at DATETIME,
+    rejected_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    rejected_at DATETIME,
+    rejection_reason TEXT,
+    payment_date DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )
+`;
+
+function migratePermitsStatusCheck(db) {
+  if (!tableExists(db, 'permits')) return false;
+  const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'permits'").get();
+  if (!row || !row.sql || row.sql.includes("'paid'")) return false;
+
+  db.exec('PRAGMA foreign_keys = OFF');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.exec('DROP TABLE IF EXISTS permits_migrated');
+    db.exec(PERMITS_MIGRATION_SQL);
+    const oldColumns = db.prepare('PRAGMA table_info(permits)').all().map((c) => c.name);
+    const newColumns = new Set(db.prepare('PRAGMA table_info(permits_migrated)').all().map((c) => c.name));
+    const common = oldColumns.filter((c) => newColumns.has(c));
+    const columnList = common.map((c) => `"${c}"`).join(', ');
+    db.exec(`INSERT INTO permits_migrated (${columnList}) SELECT ${columnList} FROM permits`);
+    db.exec('DROP TABLE permits');
+    db.exec('ALTER TABLE permits_migrated RENAME TO permits');
+    db.exec('COMMIT');
+    return true;
+  } catch (err) {
+    try { db.exec('ROLLBACK'); } catch { /* ignore */ }
+    throw err;
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON');
+  }
+}
+
+/**
+ * One-time RBAC update for the client portal. The old matrix gave Clients
+ * (viewer) access to the whole Clients and Reports modules, which exposed other
+ * people's records. This runs once (tracked in settings) and then leaves any
+ * administrator customisation untouched.
+ */
+function migrateClientPortalPermissions(db) {
+  const flag = 'migration_client_portal_v1';
+  if (db.prepare('SELECT value FROM settings WHERE key = ?').get(flag)) return false;
+  const setPerm = db.prepare('UPDATE role_permissions SET viewer = ? WHERE module = ?');
+  setPerm.run(1, 'permits');
+  setPerm.run(1, 'dashboard');
+  setPerm.run(0, 'clients');
+  setPerm.run(0, 'payments');
+  setPerm.run(0, 'reports');
+  setPerm.run(0, 'audit_logs');
+  setPerm.run(0, 'users');
+  setPerm.run(0, 'settings');
+  setPerm.run(0, 'rbac');
+  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(flag, new Date().toISOString());
+  return true;
 }
 
 /** Add any missing column from ADDITIVE_COLUMNS, then backfill safe defaults. */
@@ -416,11 +586,13 @@ function ensureDatabase(db) {
   const tablesBefore = listTables(db);
 
   createTables(db);
+  const permitsMigrated = migratePermitsStatusCheck(db);
   const columnsAdded = ensureColumns(db);
   const indexErrors = createIndexes(db);
 
   seedRolePermissions(db);
   seedSettings(db);
+  const portalPermissionsMigrated = migrateClientPortalPermissions(db);
   const officeCreated = seedOfficeInfo(db);
   const usersCreated = seedUsers(db);
 
@@ -429,6 +601,8 @@ function ensureDatabase(db) {
     tablesBefore,
     tablesCreated: listTables(db).filter((table) => !tablesBefore.includes(table)),
     columnsAdded,
+    permitsMigrated,
+    portalPermissionsMigrated,
     indexErrors,
     officeCreated,
     usersCreated,
@@ -443,7 +617,7 @@ function getDatabaseStatus(db) {
     tables,
     missingTables: EXPECTED_TABLES.filter((table) => !tables.includes(table)),
   };
-  for (const table of ['users', 'clients', 'permits', 'payments']) {
+  for (const table of ['users', 'clients', 'permits', 'application_documents', 'approval_records', 'payments']) {
     status[table] = tables.includes(table) ? countRows(db, table) : 0;
   }
   return status;
@@ -457,6 +631,12 @@ function reportProvisioning(result) {
     if (result.tablesCreated.length) lines.push(`Tables created: ${result.tablesCreated.join(', ')}`);
   } else if (result.tablesCreated.length) {
     lines.push(`Added missing tables: ${result.tablesCreated.join(', ')}`);
+  }
+  if (result.permitsMigrated) {
+    lines.push('Migrated permits table to add the "paid" status (existing records preserved).');
+  }
+  if (result.portalPermissionsMigrated) {
+    lines.push('Applied client-portal RBAC defaults (viewer limited to own applications).');
   }
   if (result.columnsAdded.length) {
     lines.push(`Added missing columns: ${result.columnsAdded.join(', ')}`);
@@ -490,6 +670,8 @@ module.exports = {
   seedSettings,
   seedUsers,
   ensureDatabase,
+  migratePermitsStatusCheck,
+  migrateClientPortalPermissions,
   getDatabaseStatus,
   reportProvisioning,
   isDatabaseReady,

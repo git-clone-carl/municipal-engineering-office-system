@@ -12,13 +12,15 @@ const { getDatabaseStatus, EXPECTED_TABLES } = require('./schema');
 // Requiring ./db applies the schema and logs anything it had to create/repair.
 const db = require('./db');
 
-const dbPath = path.join(__dirname, 'municipal.db');
+const dbPath = process.env.DB_PATH
+  ? path.resolve(process.env.DB_PATH)
+  : path.join(__dirname, 'municipal.db');
 const status = getDatabaseStatus(db);
 
 console.log('');
 console.log(`Database file: ${dbPath}`);
 console.log(`Tables (${status.tables.length}): ${status.tables.join(', ')}`);
-console.log(`Rows: users=${status.users} clients=${status.clients} permits=${status.permits} payments=${status.payments}`);
+console.log(`Rows: users=${status.users} clients=${status.clients} permits=${status.permits} documents=${status.application_documents} approvals=${status.approval_records} payments=${status.payments}`);
 
 if (status.missingTables.length) {
   console.error(`ERROR: missing tables -> ${status.missingTables.join(', ')} (expected: ${EXPECTED_TABLES.join(', ')})`);

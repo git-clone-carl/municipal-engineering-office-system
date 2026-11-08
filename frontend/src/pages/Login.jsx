@@ -12,7 +12,7 @@ import bg6 from '../bg/b6.jpg';
 const BACKGROUNDS = [bg1, bg2, bg3, bg4, bg5, bg6];
 
 export default function Login() {
-  const { login } = useAuth();
+  const { login, register } = useAuth();
 
   // Login form state
   const [username, setUsername] = useState('');
@@ -25,6 +25,12 @@ export default function Login() {
   const [successMsg, setSuccessMsg] = useState('');
   const [loading, setLoading] = useState(false);
   const [termsOpen, setTermsOpen] = useState(false);
+  const [registerOpen, setRegisterOpen] = useState(false);
+  const [registerForm, setRegisterForm] = useState({
+    full_name: '', username: '', password: '', confirm: '', email: '', contact_number: '', address: '',
+  });
+  const [registerError, setRegisterError] = useState('');
+  const [registerLoading, setRegisterLoading] = useState(false);
   const [bgIndex, setBgIndex] = useState(0);
 
   useEffect(() => {
@@ -50,6 +56,31 @@ export default function Login() {
       setError(err.message || 'Login failed');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRegisterSubmit = async (e) => {
+    e.preventDefault();
+    setRegisterError('');
+    if (registerForm.password !== registerForm.confirm) {
+      setRegisterError('Passwords do not match');
+      return;
+    }
+    setRegisterLoading(true);
+    try {
+      await register({
+        full_name: registerForm.full_name,
+        username: registerForm.username,
+        password: registerForm.password,
+        email: registerForm.email,
+        contact_number: registerForm.contact_number,
+        address: registerForm.address,
+      });
+      setRegisterOpen(false);
+    } catch (err) {
+      setRegisterError(err.message || 'Registration failed');
+    } finally {
+      setRegisterLoading(false);
     }
   };
 
@@ -137,9 +168,70 @@ export default function Login() {
                   Terms &amp; Services
                 </button>
               </div>
+
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ width: '100%', padding: '11px', marginTop: 12 }}
+                onClick={() => { setRegisterError(''); setRegisterOpen(true); }}
+              >
+                Create Client Account
+              </button>
             </form>
         </div>
       </div>
+
+      <Modal
+        open={registerOpen}
+        onClose={() => setRegisterOpen(false)}
+        title="Create Client Account"
+        footer={
+          <>
+            <button className="btn btn-secondary" onClick={() => setRegisterOpen(false)}>Cancel</button>
+            <button className="btn btn-primary" onClick={handleRegisterSubmit} disabled={registerLoading}>
+              {registerLoading ? 'Creating...' : 'Create Account'}
+            </button>
+          </>
+        }
+      >
+        {registerError && <div className="login-error">{registerError}</div>}
+        <p className="page-subtitle" style={{ marginBottom: 12 }}>
+          Client accounts can submit permit applications and upload PDF requirements.
+          Staff, Engineer and Cashier accounts are created by the System Administrator.
+        </p>
+        <div className="form-group">
+          <label>Full Name *</label>
+          <input className="form-control" value={registerForm.full_name} onChange={(e) => setRegisterForm({ ...registerForm, full_name: e.target.value })} />
+        </div>
+        <div className="form-row">
+          <div className="form-group">
+            <label>Username *</label>
+            <input className="form-control" value={registerForm.username} onChange={(e) => setRegisterForm({ ...registerForm, username: e.target.value })} />
+          </div>
+          <div className="form-group">
+            <label>Contact Number</label>
+            <input className="form-control" value={registerForm.contact_number} onChange={(e) => setRegisterForm({ ...registerForm, contact_number: e.target.value })} />
+          </div>
+        </div>
+        <div className="form-group">
+          <label>Email</label>
+          <input className="form-control" type="email" value={registerForm.email} onChange={(e) => setRegisterForm({ ...registerForm, email: e.target.value })} />
+        </div>
+        <div className="form-group">
+          <label>Address</label>
+          <input className="form-control" value={registerForm.address} onChange={(e) => setRegisterForm({ ...registerForm, address: e.target.value })} />
+        </div>
+        <div className="form-row">
+          <div className="form-group">
+            <label>Password * (min. 6 characters)</label>
+            <input className="form-control" type="password" value={registerForm.password} onChange={(e) => setRegisterForm({ ...registerForm, password: e.target.value })} />
+          </div>
+          <div className="form-group">
+            <label>Confirm Password *</label>
+            <input className="form-control" type="password" value={registerForm.confirm} onChange={(e) => setRegisterForm({ ...registerForm, confirm: e.target.value })} />
+          </div>
+        </div>
+      </Modal>
 
       <Modal open={termsOpen} onClose={() => setTermsOpen(false)} title="Terms of Service & Data Privacy Notice" large>
         <div className="terms-content">

@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { api } from '../api/client';
+import { useAuth } from '../context/AuthContext';
 import { Icon, formatCurrency, formatDateTime, PERMIT_TYPES, STATUS_LABELS } from '../components/UI';
 
 const PIE_COLORS = ['#7f1d1d', '#b91c1c', '#dc2626', '#ef4444', '#f87171', '#fee2e2'];
 
 export default function Dashboard() {
+  const { user } = useAuth();
+  const isClient = user?.role === 'viewer';
   const [stats, setStats] = useState(null);
   const [monthly, setMonthly] = useState([]);
   const [distribution, setDistribution] = useState([]);
@@ -14,29 +17,47 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([
-      api.getDashboardStats(),
-      api.getMonthlyPermits(),
-      api.getStatusDistribution(),
-      api.getWeeklyTransactions(),
-      api.getRecentActivities(),
-    ]).then(([s, m, d, w, a]) => {
-      setStats(s);
-      setMonthly(m.map((x) => ({ ...x, label: x.month?.slice(5) || x.month })));
-      setDistribution(d.map((x) => ({ name: STATUS_LABELS[x.status] || x.status, value: x.count })));
-      setWeekly(w.map((x) => ({ ...x, label: x.day?.slice(5) || x.day })));
-      setActivities(a);
-    }).finally(() => setLoading(false));
+    let active = true;
+    const loadDashboard = (initial = false) => {
+      Promise.all([
+        api.getDashboardStats(),
+        api.getMonthlyPermits(),
+        api.getStatusDistribution(),
+        api.getWeeklyTransactions(),
+        api.getRecentActivities(),
+      ]).then(([s, m, d, w, a]) => {
+        if (!active) return;
+        setStats(s);
+        setMonthly(m.map((x) => ({ ...x, label: x.month?.slice(5) || x.month })));
+        setDistribution(d.map((x) => ({ name: STATUS_LABELS[x.status] || x.status, value: x.count })));
+        setWeekly(w.map((x) => ({ ...x, label: x.day?.slice(5) || x.day })));
+        setActivities(a);
+      }).finally(() => { if (active) setLoading(false); });
+    };
+    loadDashboard(true);
+    const timer = setInterval(() => loadDashboard(false), 30000);
+    return () => { active = false; clearInterval(timer); };
   }, []);
 
-  if (loading) return <div className="loading">Loading dashboard...</div>;
+  if (loading || !stats) return <div className="loading">Loading dashboard...</div>;
 
   const statCards = [
-    { label: 'Total Clients', value: stats.totalClients, icon: 'clients' },
+    { label: isClient ? 'My Applications' : 'Total Clients', value: isClient ? stats.pendingRequests + stats.approvedPermits : stats.totalClients, icon: 'clients' },
     { label: 'Pending Requests', value: stats.pendingRequests, icon: 'permits' },
     { label: 'Approved Permits', value: stats.approvedPermits, icon: 'shield' },
     { label: 'Released Documents', value: stats.releasedDocs, icon: 'reports' },
   ];
+
+  let queueMessage = '';
+  if (user?.role === 'municipal_engineer') {
+    queueMessage = `${stats.forApproval} application${stats.forApproval === 1 ? '' : 's'} awaiting your approval`;
+  } else if (user?.role === 'cashier') {
+    queueMessage = `${stats.awaitingPayment} approved application${stats.awaitingPayment === 1 ? '' : 's'} awaiting payment`;
+  } else if (isClient) {
+    queueMessage = `${stats.pendingRequests} application${stats.pendingRequests === 1 ? '' : 's'} in progress`;
+  } else if (['admin', 'engineering_staff'].includes(user?.role)) {
+    queueMessage = `${stats.forApproval} for engineer approval · ${stats.awaitingPayment} awaiting payment`;
+  }
 
   return (
     <div>
@@ -46,6 +67,13 @@ export default function Dashboard() {
           <h1 className="page-title">Dashboard</h1>
         </div>
       </div>
+
+      {queueMessage && (
+        <div className="dashboard-queue-banner">
+          <Icon name="bell" size={16} />
+          <span>{queueMessage}</span>
+        </div>
+      )}
 
       {/* Floating Stat Cards - 4 Column Full Width */}
       <div className="stat-grid">
@@ -60,7 +88,8 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* 2-Column Financial Summary Cards */}
+      {/* 2-Column Financial Summary Cards (staff roles only) */}
+      {!isClient && (
       <div className="chart-grid-2">
         <div className="card">
           <div className="card-header">
@@ -86,6 +115,7 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+      )}
 
       {/* 2-Column Side-by-Side Analytics Charts (Stretch 50%/50% Full Width) */}
       <div className="chart-grid-2">
