@@ -37,9 +37,32 @@ const pdfUpload = multer({
   },
 });
 
+const pdfMultipleUpload = multer({
+  storage,
+  limits: { fileSize: MAX_FILE_SIZE, files: 15 },
+  fileFilter: (_req, file, cb) => {
+    const isPdf = file.mimetype === 'application/pdf'
+      && path.extname(file.originalname || '').toLowerCase() === '.pdf';
+    if (!isPdf) return cb(new Error('Only PDF files are allowed'));
+    cb(null, true);
+  },
+});
+
 /** Multer wrapper that turns upload errors into clean 400 responses. */
 function uploadPdf(req, res, next) {
   pdfUpload.single('file')(req, res, (err) => {
+    if (err) {
+      const message = err.code === 'LIMIT_FILE_SIZE'
+        ? `PDF is too large. Maximum size is ${Math.round(MAX_FILE_SIZE / (1024 * 1024))} MB.`
+        : err.message || 'Upload failed';
+      return res.status(400).json({ error: message });
+    }
+    next();
+  });
+}
+
+function uploadMultiplePdfs(req, res, next) {
+  pdfMultipleUpload.array('files', 15)(req, res, (err) => {
     if (err) {
       const message = err.code === 'LIMIT_FILE_SIZE'
         ? `PDF is too large. Maximum size is ${Math.round(MAX_FILE_SIZE / (1024 * 1024))} MB.`
@@ -68,6 +91,11 @@ function removeUploadedFile(file) {
   try { fs.unlinkSync(file.path); } catch { /* ignore */ }
 }
 
+function removeUploadedFiles(files) {
+  if (!Array.isArray(files)) return;
+  for (const file of files) removeUploadedFile(file);
+}
+
 function documentPath(storedName) {
   const safe = path.basename(String(storedName || ''));
   return path.join(UPLOAD_DIR, safe);
@@ -77,7 +105,9 @@ module.exports = {
   UPLOAD_DIR,
   MAX_FILE_SIZE,
   uploadPdf,
+  uploadMultiplePdfs,
   isPdfSignature,
   removeUploadedFile,
+  removeUploadedFiles,
   documentPath,
 };

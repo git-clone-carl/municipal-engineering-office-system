@@ -168,7 +168,9 @@ router.post('/', authenticate, checkPermission('payments'),
       `Payment ${orNumber} of PHP ${paymentAmount.toFixed(2)} for ${permit.application_no}`, getClientIp(req));
     notifyClient(permitId, 'Payment Received',
       `Payment received for ${permit.application_no}. Official Receipt ${orNumber}.`, 'success');
-    notifyRole(['engineering_staff', 'municipal_engineer', 'admin'], 'Payment Completed',
+    notifyRole(['engineering_staff', 'admin'], 'Paid & Ready for Release',
+      `${permit.application_no} has been paid in full (OR ${orNumber}) and is pending release.`, 'success', permitId);
+    notifyRole(['municipal_engineer'], 'Payment Completed',
       `${permit.application_no} was paid in full. OR ${orNumber}.`, 'success', permitId);
 
     res.status(201).json({

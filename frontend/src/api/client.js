@@ -30,6 +30,8 @@ export const api = {
   getMe: () => request('/auth/me'),
   getPermissions: () => request('/auth/permissions'),
   getLanStatus: () => request('/auth/lan-status'),
+  getPublicRequirements: () => request('/public/requirements'),
+  submitPublicApplication: (formData) => request('/public/apply', { method: 'POST', body: formData }),
 
   getDashboardStats: () => request('/dashboard/stats'),
   getMonthlyPermits: () => request('/dashboard/monthly-permits'),

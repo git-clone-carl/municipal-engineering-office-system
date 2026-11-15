@@ -387,6 +387,244 @@ export function formatFileSize(bytes) {
   return `${(size / (1024 * 1024)).toFixed(2)} MB`;
 }
 
+export function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+export function buildFormalHeaderHtml({ office, title, subtitle = '' }) {
+  const logoUrl = `${window.location.origin}/gumacalogo.png`;
+  const officeName = escapeHtml(office?.office_name || 'Municipal Engineering Office');
+  const address = office?.address ? `<div class="hdr-sub">${escapeHtml(office.address)}</div>` : '';
+  const contact = office?.contact_number ? `<div class="hdr-sub">Tel: ${escapeHtml(office.contact_number)}</div>` : '';
+  return `
+    <div class="formal-header">
+      <div class="formal-logo-banner">
+        <img src="${logoUrl}" alt="Municipality of Gumaca Logo" class="formal-logo" />
+      </div>
+      <div class="hdr-office">${officeName}</div>
+      ${address}
+      ${contact}
+      <div class="hdr-doc-title">${escapeHtml(title)}</div>
+      ${subtitle ? `<div class="hdr-doc-sub">${escapeHtml(subtitle)}</div>` : ''}
+    </div>
+  `;
+}
+
+/**
+ * Prints a standalone formal HTML document in a hidden iframe so the website UI
+ * (sidebar, modals, scrollbars, shadows) never leaks into or clips the PDF.
+ */
+export function printDocumentHtml({ title = 'Document', bodyHtml, pageSize = 'A4 portrait' }) {
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.right = '0';
+  iframe.style.bottom = '0';
+  iframe.style.width = '0';
+  iframe.style.height = '0';
+  iframe.style.border = '0';
+  iframe.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentWindow.document;
+  doc.open();
+  doc.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(title)}</title>
+  <style>
+    @page { size: ${pageSize}; margin: 12mm; }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #ffffff;
+      color: #111827;
+      font-family: 'Segoe UI', Arial, Helvetica, sans-serif;
+      font-size: 11.5px;
+      line-height: 1.45;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .formal-doc { width: 100%; max-width: 100%; margin: 0 auto; }
+    .formal-header {
+      text-align: center;
+      padding-bottom: 10px;
+      margin-bottom: 14px;
+      border-bottom: 2px solid #7f1d1d;
+    }
+    .formal-logo-banner {
+      background: #7f1d1d;
+      padding: 10px 16px;
+      border-radius: 6px;
+      margin-bottom: 10px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .formal-logo {
+      display: block;
+      margin: 0 auto;
+      max-height: 58px;
+      width: auto;
+      object-fit: contain;
+    }
+    .hdr-office { font-size: 15px; font-weight: 800; color: #7f1d1d; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+    .hdr-sub { font-size: 10px; color: #4b5563; }
+    .hdr-doc-title {
+      margin-top: 10px;
+      font-size: 15px;
+      font-weight: 800;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: #111827;
+    }
+    .hdr-doc-sub { font-size: 10.5px; color: #4b5563; margin-top: 2px; }
+
+    /* Receipt & Permit formal blocks */
+    .receipt-box {
+      border: 1.5px solid #374151;
+      padding: 16px 20px;
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+    .meta-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 8px 0;
+      margin-bottom: 10px;
+      border-top: 1px dashed #9ca3af;
+      border-bottom: 1px dashed #9ca3af;
+    }
+    .meta-label { display: block; font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280; }
+    .meta-val { font-size: 12.5px; font-weight: 700; color: #111827; }
+    .kv-table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+    .kv-table td { padding: 5px 4px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+    .kv-table td.kv-key { width: 34%; font-weight: 600; color: #374151; }
+    .kv-table td.kv-val { color: #111827; }
+    .amount-box {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin: 12px 0;
+      padding: 10px 14px;
+      border: 2px solid #7f1d1d;
+      background: #fef2f2;
+    }
+    .amount-box span { font-size: 11px; font-weight: 800; letter-spacing: 1px; color: #7f1d1d; }
+    .amount-box strong { font-size: 18px; font-weight: 800; color: #7f1d1d; }
+
+    /* Report formal tables */
+    .section-title {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: #7f1d1d;
+      margin: 14px 0 6px;
+      padding-bottom: 3px;
+      border-bottom: 1px solid #d1d5db;
+    }
+    table.data-table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 10.5px; }
+    table.data-table th, table.data-table td {
+      border: 1px solid #9ca3af;
+      padding: 5px 7px;
+      text-align: left;
+    }
+    table.data-table th {
+      background: #f3f4f6;
+      font-weight: 700;
+      color: #111827;
+      text-transform: uppercase;
+      font-size: 9.5px;
+      letter-spacing: 0.3px;
+    }
+    table.data-table tr { page-break-inside: avoid; break-inside: avoid; }
+    table.data-table td.num, table.data-table th.num { text-align: right; }
+    table.data-table tr.total-row td { font-weight: 700; background: #f9fafb; }
+
+    .qr-wrap { text-align: center; margin: 14px 0; }
+    .qr-wrap img { width: 110px; height: 110px; }
+    .signatory-grid {
+      display: flex;
+      justify-content: space-between;
+      gap: 32px;
+      margin-top: 24px;
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+    .sig-block { flex: 1; text-align: center; }
+    .sig-block.left { text-align: left; }
+    .sig-line {
+      margin-top: 28px;
+      border-top: 1px solid #111827;
+      padding-top: 4px;
+      font-weight: 700;
+      font-size: 11px;
+    }
+    .sig-role { font-size: 10px; color: #4b5563; }
+    .doc-note {
+      margin-top: 12px;
+      padding-top: 8px;
+      border-top: 1px solid #e5e7eb;
+      text-align: center;
+      font-size: 9.5px;
+      color: #6b7280;
+    }
+  </style>
+</head>
+<body>
+  <div class="formal-doc">${bodyHtml}</div>
+</body>
+</html>`);
+  doc.close();
+
+  const triggerPrint = () => {
+    try {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+    } finally {
+      setTimeout(() => {
+        if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+      }, 1500);
+    }
+  };
+
+  const images = Array.from(doc.images || []);
+  if (images.length === 0) {
+    setTimeout(triggerPrint, 50);
+    return;
+  }
+
+  let settled = false;
+  const finishOnce = () => {
+    if (settled) return;
+    settled = true;
+    setTimeout(triggerPrint, 60);
+  };
+
+  let remaining = images.length;
+  const onAssetDone = () => {
+    remaining -= 1;
+    if (remaining <= 0) finishOnce();
+  };
+
+  images.forEach((img) => {
+    if (img.complete) {
+      onAssetDone();
+    } else {
+      img.addEventListener('load', onAssetDone, { once: true });
+      img.addEventListener('error', onAssetDone, { once: true });
+    }
+  });
+  setTimeout(finishOnce, 1200);
+}
+
 /** Browser-native printing with a receipt-only print layout (see index.css). */
 export function printElement() {
   document.body.classList.add('print-receipt');

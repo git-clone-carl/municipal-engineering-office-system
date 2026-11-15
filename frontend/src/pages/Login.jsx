@@ -1,7 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../api/client';
-import { Modal } from '../components/UI';
+import {
+  Modal, CustomSelect, CustomDatePicker, Icon,
+  PERMIT_TYPES, formatCurrency, formatFileSize,
+} from '../components/UI';
 import bg1 from '../bg/b1.jpg';
 import bg2 from '../bg/b2.jpg';
 import bg3 from '../bg/b3.jpg';
@@ -11,26 +14,60 @@ import bg6 from '../bg/b6.jpg';
 
 const BACKGROUNDS = [bg1, bg2, bg3, bg4, bg5, bg6];
 
-export default function Login() {
-  const { login, register } = useAuth();
+const FALLBACK_REQUIREMENTS = {
+  building: [
+    'Certified True Copy of Title',
+    'Tax Declaration',
+    'Building Plans (Signed & Sealed)',
+    'Bill of Materials',
+    'Barangay Clearance',
+    'Occupancy Permit Application',
+  ],
+  electrical: ['Electrical Plans', 'Load Computation', 'Tax Declaration', 'Barangay Clearance'],
+  occupancy: ['Building Permit', 'Certificate of Completion', 'Fire Safety Certificate', 'Tax Declaration'],
+  locational: ['Lot Plan', 'Tax Declaration', 'Barangay Clearance', 'Zoning Clearance'],
+  certificate: ['Application Form', 'Valid ID', 'Tax Declaration'],
+};
 
-  // Login form state
+const FORM_STEPS = ['Applicant & Permit Details', 'Upload Requirements', 'Review & Submit'];
+
+const createEmptyClientForm = () => ({
+  full_name: '',
+  contact_number: '',
+  email: '',
+  address: '',
+  permit_type: 'building',
+  application_date: new Date().toISOString().split('T')[0],
+  project_location: '',
+  nature_of_construction: '',
+  building_type: '',
+  total_floor_area: '',
+  num_storeys: 1,
+  notes: '',
+});
+
+export default function Login() {
+  const { login } = useAuth();
+
+  // Client application form state
+  const [step, setStep] = useState(0);
+  const [clientForm, setClientForm] = useState(createEmptyClientForm);
+  const [requirementsMap, setRequirementsMap] = useState(FALLBACK_REQUIREMENTS);
+  const [requirementFiles, setRequirementFiles] = useState({});
+  const [formError, setFormError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [submittedResult, setSubmittedResult] = useState(null);
+
+  // Staff login modal state (triggered from subtle left button)
+  const [staffLoginOpen, setStaffLoginOpen] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [remember, setRemember] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [loginError, setLoginError] = useState('');
+  const [loginLoading, setLoginLoading] = useState(false);
 
-  // General UI state
-  const [error, setError] = useState('');
-  const [successMsg, setSuccessMsg] = useState('');
-  const [loading, setLoading] = useState(false);
   const [termsOpen, setTermsOpen] = useState(false);
-  const [registerOpen, setRegisterOpen] = useState(false);
-  const [registerForm, setRegisterForm] = useState({
-    full_name: '', username: '', password: '', confirm: '', email: '', contact_number: '', address: '',
-  });
-  const [registerError, setRegisterError] = useState('');
-  const [registerLoading, setRegisterLoading] = useState(false);
   const [bgIndex, setBgIndex] = useState(0);
 
   useEffect(() => {
@@ -39,53 +76,104 @@ export default function Login() {
   }, []);
 
   useEffect(() => {
+    api.getPublicRequirements()
+      .then((res) => {
+        if (res?.requirements) setRequirementsMap(res.requirements);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
     const timer = setInterval(() => setBgIndex((i) => (i + 1) % BACKGROUNDS.length), 5000);
     return () => clearInterval(timer);
   }, []);
 
+  const requiredDocs = requirementsMap[clientForm.permit_type] || FALLBACK_REQUIREMENTS[clientForm.permit_type] || [];
+
+  const handleReqFileChange = (reqName, file) => {
+    setFormError('');
+    if (!file) return;
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      setFormError(`"${file.name}" is not a PDF file. Only PDF files are allowed.`);
+      return;
+    }
+    setRequirementFiles((prev) => ({ ...prev, [reqName]: file }));
+  };
+
+  const handleNextStep = () => {
+    setFormError('');
+    if (step === 0) {
+      if (!clientForm.full_name.trim() || !clientForm.contact_number.trim() || !clientForm.address.trim()) {
+        setFormError('Please fill in your Full Name, Contact Number, and Address.');
+        return;
+      }
+      if (!clientForm.project_location.trim()) {
+        setFormError('Please enter the Project Location.');
+        return;
+      }
+    }
+    if (step === 1) {
+      const missing = requiredDocs.filter((r) => !requirementFiles[r]);
+      if (missing.length > 0) {
+        setFormError(`You cannot proceed without uploading all required PDF documents. Missing: ${missing.join(', ')}`);
+        return;
+      }
+    }
+    setStep((s) => s + 1);
+  };
+
+  const handleClientSubmit = async () => {
+    setFormError('');
+    const missing = requiredDocs.filter((r) => !requirementFiles[r]);
+    if (missing.length > 0) {
+      setFormError(`Please upload all required PDF documents. Missing: ${missing.join(', ')}`);
+      setStep(1);
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const fd = new FormData();
+      Object.entries(clientForm).forEach(([k, v]) => fd.append(k, String(v ?? '')));
+      fd.append('requirement_names', JSON.stringify(requiredDocs));
+      requiredDocs.forEach((reqName) => {
+        fd.append('files', requirementFiles[reqName]);
+      });
+
+      const result = await api.submitPublicApplication(fd);
+      setSubmittedResult(result);
+    } catch (err) {
+      setFormError(err.message || 'Failed to submit application');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const resetClientForm = () => {
+    setClientForm(createEmptyClientForm());
+    setRequirementFiles({});
+    setFormError('');
+    setSubmittedResult(null);
+    setStep(0);
+  };
+
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
-    setError('');
-    setSuccessMsg('');
-    setLoading(true);
+    setLoginError('');
+    setLoginLoading(true);
     try {
       await login(username, password);
       if (remember) localStorage.setItem('remember_user', username);
       else localStorage.removeItem('remember_user');
     } catch (err) {
-      setError(err.message || 'Login failed');
+      setLoginError(err.message || 'Login failed');
     } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleRegisterSubmit = async (e) => {
-    e.preventDefault();
-    setRegisterError('');
-    if (registerForm.password !== registerForm.confirm) {
-      setRegisterError('Passwords do not match');
-      return;
-    }
-    setRegisterLoading(true);
-    try {
-      await register({
-        full_name: registerForm.full_name,
-        username: registerForm.username,
-        password: registerForm.password,
-        email: registerForm.email,
-        contact_number: registerForm.contact_number,
-        address: registerForm.address,
-      });
-      setRegisterOpen(false);
-    } catch (err) {
-      setRegisterError(err.message || 'Registration failed');
-    } finally {
-      setRegisterLoading(false);
+      setLoginLoading(false);
     }
   };
 
   return (
-    <div className="login-page">
+    <div className="login-page" style={{ padding: '24px 16px' }}>
       <div className="login-bg">
         {BACKGROUNDS.map((src, i) => (
           <img key={src} src={src} alt="" className={`login-bg-img ${i === bgIndex ? 'active' : ''}`} />
@@ -93,144 +181,414 @@ export default function Login() {
         <div className="login-bg-overlay" />
       </div>
 
-      <div className="login-card" style={{ maxWidth: 440 }}>
-        {/* Seamless Header Banner matching gumacalogo.png background 100% */}
+      {/* Subtle hidden staff login button on the left */}
+      <button
+        type="button"
+        onClick={() => { setLoginError(''); setStaffLoginOpen(true); }}
+        title="Staff Login"
+        style={{
+          position: 'fixed',
+          left: 16,
+          bottom: 16,
+          zIndex: 30,
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '6px 11px',
+          borderRadius: 999,
+          border: '1px solid rgba(255, 255, 255, 0.22)',
+          background: 'rgba(17, 24, 39, 0.35)',
+          backdropFilter: 'blur(6px)',
+          color: 'rgba(255, 255, 255, 0.72)',
+          fontSize: 11.5,
+          fontWeight: 600,
+          cursor: 'pointer',
+          opacity: 0.45,
+          transition: 'opacity 0.2s ease, background 0.2s ease',
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.background = 'rgba(17, 24, 39, 0.75)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.45'; e.currentTarget.style.background = 'rgba(17, 24, 39, 0.35)'; }}
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+          <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+        </svg>
+        <span>Staff</span>
+      </button>
+
+      <div className="login-card" style={{ maxWidth: 760, width: '100%' }}>
         <div className="login-header-banner">
           <img src="/gumacalogo.png" alt="Municipality of Gumaca" className="login-gumaca-banner" />
         </div>
 
-        <div className="login-body">
+        <div className="login-body" style={{ padding: '24px 28px' }}>
           <h1>MUNICIPAL ENGINEERING OFFICE</h1>
-          <p className="subtitle">Municipality of Gumaca, Quezon • Official Portal</p>
+          <p className="subtitle" style={{ marginBottom: 18 }}>
+            Municipality of Gumaca, Quezon • Client Permit Application Form
+          </p>
 
-          {error && <div className="login-error">{error}</div>}
-          {successMsg && (
-            <div className="badge badge-active" style={{ width: '100%', padding: '10px', textAlign: 'center', marginBottom: 16 }}>
-              {successMsg}
-            </div>
-          )}
+          {submittedResult ? (
+            <div style={{ textAlign: 'center', padding: '12px 4px' }}>
+              <div
+                style={{
+                  width: 56, height: 56, borderRadius: '50%',
+                  background: 'rgba(22, 163, 74, 0.14)', color: 'var(--green-800)',
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12,
+                }}
+              >
+                <Icon name="check" size={28} />
+              </div>
+              <h2 style={{ margin: '0 0 6px', fontSize: 20 }}>Application Submitted!</h2>
+              <p className="page-subtitle" style={{ marginBottom: 18 }}>
+                Your permit application and required PDF documents have been received by the Municipal Engineering Office.
+              </p>
 
-          <form onSubmit={handleLoginSubmit}>
-              <div className="form-group">
-                <label>Username</label>
-                <input
-                  className="form-control"
-                  placeholder="Enter your username"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  required
-                />
+              <div
+                style={{
+                  textAlign: 'left',
+                  padding: 16,
+                  borderRadius: 'var(--radius-subcard)',
+                  border: '1px solid var(--border-color)',
+                  background: 'var(--bg-subcard)',
+                  marginBottom: 18,
+                }}
+              >
+                <div className="doc-field"><span className="label">Application No.</span><strong>{submittedResult.application_no}</strong></div>
+                <div className="doc-field"><span className="label">Client ID</span><span>{submittedResult.client_code}</span></div>
+                <div className="doc-field"><span className="label">Applicant Name</span><span>{submittedResult.client_name}</span></div>
+                <div className="doc-field"><span className="label">Permit Type</span><span>{PERMIT_TYPES[submittedResult.permit_type] || submittedResult.permit_type}</span></div>
+                <div className="doc-field"><span className="label">Project Location</span><span>{submittedResult.project_location}</span></div>
+                <div className="doc-field"><span className="label">Uploaded Requirements</span><span>{submittedResult.uploaded_count} PDF file(s)</span></div>
+                <div className="doc-field"><span className="label">Estimated Permit Fee</span><strong>{formatCurrency(submittedResult.total_fee)}</strong></div>
               </div>
-              <div className="form-group">
-                <label>Password</label>
-                <div className="password-field">
-                  <input
-                    className="form-control"
-                    type={showPassword ? 'text' : 'password'}
-                    placeholder="Enter your password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                  />
-                  <button
-                    type="button"
-                    className="password-toggle"
-                    onClick={() => setShowPassword(!showPassword)}
-                    title={showPassword ? 'Hide password' : 'Show password'}
-                  >
-                    {showPassword ? (
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19M14.12 14.12a3 3 0 11-4.24-4.24M1 1l22 22" />
-                      </svg>
-                    ) : (
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                        <circle cx="12" cy="12" r="3" />
-                      </svg>
-                    )}
-                  </button>
-                </div>
-              </div>
-              <button className="btn btn-primary" style={{ width: '100%', padding: '12px', marginTop: 8 }} disabled={loading}>
-                {loading ? 'Signing in...' : 'SIGN IN'}
+
+              <button type="button" className="btn btn-primary" onClick={resetClientForm}>
+                Submit Another Application
               </button>
+            </div>
+          ) : (
+            <>
+              <div className="stepper" style={{ marginBottom: 18 }}>
+                {FORM_STEPS.map((label, i) => (
+                  <div key={label} className={`step ${i === step ? 'active' : i < step ? 'done' : ''}`}>
+                    <div className="step-num">{i + 1}</div>
+                    <div className="step-label">{label}</div>
+                  </div>
+                ))}
+              </div>
 
-              <div className="form-group" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12, marginBottom: 0 }}>
-                <label htmlFor="remember" className="ui-checkbox-label">
-                  <input type="checkbox" id="remember" className="ui-checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-                  <span>Remember Me</span>
-                </label>
-                <button
-                  type="button"
-                  className="terms-link"
-                  onClick={() => setTermsOpen(true)}
-                >
+              {formError && <div className="login-error" style={{ marginBottom: 14 }}>{formError}</div>}
+
+              {step === 0 && (
+                <div>
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label>Full Name *</label>
+                      <input
+                        className="form-control"
+                        placeholder="e.g. Juan Dela Cruz"
+                        value={clientForm.full_name}
+                        onChange={(e) => setClientForm({ ...clientForm, full_name: e.target.value })}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Contact Number *</label>
+                      <input
+                        className="form-control"
+                        placeholder="e.g. 0917-123-4567"
+                        value={clientForm.contact_number}
+                        onChange={(e) => setClientForm({ ...clientForm, contact_number: e.target.value })}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label>Address *</label>
+                      <input
+                        className="form-control"
+                        placeholder="Barangay, Municipality, Province"
+                        value={clientForm.address}
+                        onChange={(e) => setClientForm({ ...clientForm, address: e.target.value })}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Email (Optional)</label>
+                      <input
+                        className="form-control"
+                        type="email"
+                        placeholder="name@example.com"
+                        value={clientForm.email}
+                        onChange={(e) => setClientForm({ ...clientForm, email: e.target.value })}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label>Permit Type *</label>
+                      <CustomSelect
+                        value={clientForm.permit_type}
+                        onChange={(val) => {
+                          setClientForm({ ...clientForm, permit_type: val });
+                          setRequirementFiles({});
+                        }}
+                        options={Object.entries(PERMIT_TYPES).map(([key, label]) => ({ value: key, label }))}
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Application Date</label>
+                      <CustomDatePicker
+                        value={clientForm.application_date}
+                        onChange={(val) => setClientForm({ ...clientForm, application_date: val })}
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-group">
+                    <label>Project Location *</label>
+                    <input
+                      className="form-control"
+                      placeholder="Exact site / barangay of the project"
+                      value={clientForm.project_location}
+                      onChange={(e) => setClientForm({ ...clientForm, project_location: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label>Nature of Construction</label>
+                      <input
+                        className="form-control"
+                        placeholder="e.g. New Construction, Renovation"
+                        value={clientForm.nature_of_construction}
+                        onChange={(e) => setClientForm({ ...clientForm, nature_of_construction: e.target.value })}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Building Type</label>
+                      <input
+                        className="form-control"
+                        placeholder="e.g. Residential, Commercial"
+                        value={clientForm.building_type}
+                        onChange={(e) => setClientForm({ ...clientForm, building_type: e.target.value })}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label>Estimated Floor Area (sq)</label>
+                      <input
+                        className="form-control"
+                        type="number"
+                        min="0"
+                        placeholder="Enter floor area in sq"
+                        value={clientForm.total_floor_area}
+                        onChange={(e) => setClientForm({ ...clientForm, total_floor_area: e.target.value })}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Number of Storeys</label>
+                      <input
+                        className="form-control"
+                        type="number"
+                        min="1"
+                        value={clientForm.num_storeys}
+                        onChange={(e) => setClientForm({ ...clientForm, num_storeys: e.target.value })}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label>Notes / Remarks (Optional)</label>
+                    <textarea
+                      className="form-control"
+                      rows={2}
+                      value={clientForm.notes}
+                      onChange={(e) => setClientForm({ ...clientForm, notes: e.target.value })}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {step === 1 && (
+                <div>
+                  <p style={{ marginBottom: 12, fontSize: 13.5 }}>
+                    Upload all required PDF documents for <strong>{PERMIT_TYPES[clientForm.permit_type]}</strong>. You cannot proceed without uploading every requirement.
+                  </p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {requiredDocs.map((reqName) => {
+                      const file = requirementFiles[reqName];
+                      return (
+                        <div
+                          key={reqName}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: 12,
+                            padding: '10px 12px',
+                            borderRadius: 'var(--radius-subcard)',
+                            border: `1px solid ${file ? 'var(--green-600)' : 'var(--border-color)'}`,
+                            background: file ? 'rgba(22, 163, 74, 0.06)' : 'var(--bg-subcard)',
+                          }}
+                        >
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontWeight: 600, fontSize: 13.5 }}>{reqName} *</div>
+                            <div style={{ fontSize: 12, color: file ? 'var(--green-800)' : 'var(--text-light)' }}>
+                              {file ? `Uploaded: ${file.name} (${formatFileSize(file.size)})` : 'Required (PDF only, max 10 MB)'}
+                            </div>
+                          </div>
+                          <label className="btn btn-secondary" style={{ cursor: 'pointer', whiteSpace: 'nowrap', margin: 0 }}>
+                            <Icon name="upload" size={14} /> {file ? 'Change PDF' : 'Upload PDF'}
+                            <input
+                              type="file"
+                              accept=".pdf,application/pdf"
+                              style={{ display: 'none' }}
+                              onChange={(e) => handleReqFileChange(reqName, e.target.files?.[0])}
+                            />
+                          </label>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {step === 2 && (
+                <div>
+                  <div
+                    style={{
+                      padding: 14,
+                      borderRadius: 'var(--radius-subcard)',
+                      border: '1px solid var(--border-color)',
+                      background: 'var(--bg-subcard)',
+                      marginBottom: 12,
+                    }}
+                  >
+                    <div className="doc-field"><span className="label">Full Name</span><span>{clientForm.full_name}</span></div>
+                    <div className="doc-field"><span className="label">Contact Number</span><span>{clientForm.contact_number}</span></div>
+                    <div className="doc-field"><span className="label">Address</span><span>{clientForm.address}</span></div>
+                    <div className="doc-field"><span className="label">Permit Type</span><span>{PERMIT_TYPES[clientForm.permit_type]}</span></div>
+                    <div className="doc-field"><span className="label">Project Location</span><span>{clientForm.project_location}</span></div>
+                    <div className="doc-field">
+                      <span className="label">Estimated Floor Area (sq)</span>
+                      <span>{clientForm.total_floor_area ? `${clientForm.total_floor_area} sq` : '-'}</span>
+                    </div>
+                    <div className="doc-field"><span className="label">Number of Storeys</span><span>{clientForm.num_storeys || 1}</span></div>
+                  </div>
+                  <div
+                    style={{
+                      padding: 14,
+                      borderRadius: 'var(--radius-subcard)',
+                      border: '1px solid var(--border-color)',
+                      background: 'var(--bg-subcard)',
+                    }}
+                  >
+                    <strong style={{ display: 'block', marginBottom: 8, fontSize: 13 }}>Uploaded Requirements ({requiredDocs.length})</strong>
+                    {requiredDocs.map((reqName) => (
+                      <div key={reqName} className="doc-field">
+                        <span className="label">{reqName}</span>
+                        <span>{requirementFiles[reqName]?.name || '-'}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 18, gap: 10 }}>
+                <button type="button" className="terms-link" onClick={() => setTermsOpen(true)}>
                   Terms &amp; Services
                 </button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {step > 0 && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => { setFormError(''); setStep((s) => s - 1); }}
+                      disabled={submitting}
+                    >
+                      Back
+                    </button>
+                  )}
+                  {step < FORM_STEPS.length - 1 ? (
+                    <button type="button" className="btn btn-primary" onClick={handleNextStep}>
+                      Next
+                    </button>
+                  ) : (
+                    <button type="button" className="btn btn-primary" onClick={handleClientSubmit} disabled={submitting}>
+                      {submitting ? 'Submitting...' : 'Submit Application'}
+                    </button>
+                  )}
+                </div>
               </div>
-
-              <button
-                type="button"
-                className="btn btn-secondary"
-                style={{ width: '100%', padding: '11px', marginTop: 12 }}
-                onClick={() => { setRegisterError(''); setRegisterOpen(true); }}
-              >
-                Create Client Account
-              </button>
-            </form>
+            </>
+          )}
         </div>
       </div>
 
+      {/* Staff Login Modal */}
       <Modal
-        open={registerOpen}
-        onClose={() => setRegisterOpen(false)}
-        title="Create Client Account"
-        footer={
-          <>
-            <button className="btn btn-secondary" onClick={() => setRegisterOpen(false)}>Cancel</button>
-            <button className="btn btn-primary" onClick={handleRegisterSubmit} disabled={registerLoading}>
-              {registerLoading ? 'Creating...' : 'Create Account'}
-            </button>
-          </>
-        }
+        open={staffLoginOpen}
+        onClose={() => setStaffLoginOpen(false)}
+        title="Staff & Official Login"
       >
-        {registerError && <div className="login-error">{registerError}</div>}
-        <p className="page-subtitle" style={{ marginBottom: 12 }}>
-          Client accounts can submit permit applications and upload PDF requirements.
-          Staff, Engineer and Cashier accounts are created by the System Administrator.
-        </p>
-        <div className="form-group">
-          <label>Full Name *</label>
-          <input className="form-control" value={registerForm.full_name} onChange={(e) => setRegisterForm({ ...registerForm, full_name: e.target.value })} />
-        </div>
-        <div className="form-row">
+        {loginError && <div className="login-error">{loginError}</div>}
+        <form onSubmit={handleLoginSubmit}>
           <div className="form-group">
-            <label>Username *</label>
-            <input className="form-control" value={registerForm.username} onChange={(e) => setRegisterForm({ ...registerForm, username: e.target.value })} />
+            <label>Username</label>
+            <input
+              className="form-control"
+              placeholder="Enter your username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              required
+              autoFocus
+            />
           </div>
           <div className="form-group">
-            <label>Contact Number</label>
-            <input className="form-control" value={registerForm.contact_number} onChange={(e) => setRegisterForm({ ...registerForm, contact_number: e.target.value })} />
+            <label>Password</label>
+            <div className="password-field">
+              <input
+                className="form-control"
+                type={showPassword ? 'text' : 'password'}
+                placeholder="Enter your password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+              <button
+                type="button"
+                className="password-toggle"
+                onClick={() => setShowPassword(!showPassword)}
+                title={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19M14.12 14.12a3 3 0 11-4.24-4.24M1 1l22 22" />
+                  </svg>
+                ) : (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                )}
+              </button>
+            </div>
           </div>
-        </div>
-        <div className="form-group">
-          <label>Email</label>
-          <input className="form-control" type="email" value={registerForm.email} onChange={(e) => setRegisterForm({ ...registerForm, email: e.target.value })} />
-        </div>
-        <div className="form-group">
-          <label>Address</label>
-          <input className="form-control" value={registerForm.address} onChange={(e) => setRegisterForm({ ...registerForm, address: e.target.value })} />
-        </div>
-        <div className="form-row">
-          <div className="form-group">
-            <label>Password * (min. 6 characters)</label>
-            <input className="form-control" type="password" value={registerForm.password} onChange={(e) => setRegisterForm({ ...registerForm, password: e.target.value })} />
+          <div className="form-group" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <label htmlFor="remember" className="ui-checkbox-label">
+              <input type="checkbox" id="remember" className="ui-checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+              <span>Remember Me</span>
+            </label>
           </div>
-          <div className="form-group">
-            <label>Confirm Password *</label>
-            <input className="form-control" type="password" value={registerForm.confirm} onChange={(e) => setRegisterForm({ ...registerForm, confirm: e.target.value })} />
-          </div>
-        </div>
+          <button className="btn btn-primary" style={{ width: '100%', padding: '11px' }} disabled={loginLoading}>
+            {loginLoading ? 'Signing in...' : 'SIGN IN TO DASHBOARD'}
+          </button>
+        </form>
       </Modal>
 
       <Modal open={termsOpen} onClose={() => setTermsOpen(false)} title="Terms of Service & Data Privacy Notice" large>

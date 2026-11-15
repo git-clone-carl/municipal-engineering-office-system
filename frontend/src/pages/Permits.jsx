@@ -1,15 +1,32 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../api/client';
 import {
   Icon, Modal, Pagination, PERMIT_TYPES, STATUS_LABELS, formatCurrency, formatDate,
-  formatDateTime, CustomSelect, CustomDatePicker,
+  formatDateTime, formatFileSize, CustomSelect, CustomDatePicker,
+  printDocumentHtml, buildFormalHeaderHtml, escapeHtml,
 } from '../components/UI';
 import DocumentsPanel from '../components/DocumentsPanel';
 import Receipt from '../components/Receipt';
 
 const STEPS = ['Application Details', 'Requirements', 'Payment', 'Review'];
 const STATUS_FLOW = ['submitted', 'for_review', 'for_approval', 'approved', 'paid', 'released'];
+
+const PERMIT_REQUIREMENTS_MAP = {
+  building: [
+    'Certified True Copy of Title',
+    'Tax Declaration',
+    'Building Plans (Signed & Sealed)',
+    'Bill of Materials',
+    'Barangay Clearance',
+    'Occupancy Permit Application',
+  ],
+  electrical: ['Electrical Plans', 'Load Computation', 'Tax Declaration', 'Barangay Clearance'],
+  occupancy: ['Building Permit', 'Certificate of Completion', 'Fire Safety Certificate', 'Tax Declaration'],
+  locational: ['Lot Plan', 'Tax Declaration', 'Barangay Clearance', 'Zoning Clearance'],
+  certificate: ['Application Form', 'Valid ID', 'Tax Declaration'],
+};
 
 const emptyForm = {
   permit_type: 'building',
@@ -26,6 +43,7 @@ const emptyForm = {
 
 export default function Permits() {
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const isClient = user?.role === 'viewer';
   const isStaff = ['engineering_staff', 'admin'].includes(user?.role);
   const isEngineer = user?.role === 'municipal_engineer';
@@ -54,6 +72,8 @@ export default function Permits() {
   const [viewError, setViewError] = useState('');
   const [viewSuccess, setViewSuccess] = useState('');
   const [error, setError] = useState('');
+  const [requirementFiles, setRequirementFiles] = useState({});
+  const [submitting, setSubmitting] = useState(false);
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -69,6 +89,20 @@ export default function Permits() {
   }, [page, search, status, type]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    const openId = searchParams.get('open');
+    if (!openId) return;
+    setSearchParams({}, { replace: true });
+    api.getPermit(openId)
+      .then((data) => {
+        setViewError('');
+        setViewSuccess('');
+        setSelectedPermit(data);
+        setModal('view');
+      })
+      .catch(() => {});
+  }, [searchParams, setSearchParams]);
 
   // Poll so status changes made on another laptop appear without a manual reload.
   useEffect(() => {
@@ -107,6 +141,7 @@ export default function Permits() {
 
   const openCreate = () => {
     setForm({ ...emptyForm, client_id: myClient?.id ? String(myClient.id) : '' });
+    setRequirementFiles({});
     setStep(0);
     setError('');
     setSelectedPermit(null);
@@ -134,6 +169,43 @@ export default function Permits() {
     }
   };
 
+  const requiredDocs = PERMIT_REQUIREMENTS_MAP[form.permit_type] || [];
+
+  const handleReqFileChange = (reqName, file) => {
+    setError('');
+    if (!file) return;
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      setError(`"${file.name}" is not a PDF file. Only PDF files are allowed.`);
+      return;
+    }
+    setRequirementFiles((prev) => ({ ...prev, [reqName]: file }));
+  };
+
+  const handleNextStep = () => {
+    setError('');
+    if (step === 0) {
+      const clientId = isClient ? myClient?.id : form.client_id;
+      if (!clientId) {
+        setError(isClient
+          ? 'Your client profile is still loading. Please try again.'
+          : 'Please select a client before proceeding.');
+        return;
+      }
+      if (!String(form.project_location || '').trim()) {
+        setError('Please enter the project location before proceeding.');
+        return;
+      }
+    }
+    if (step === 1) {
+      const missing = requiredDocs.filter((r) => !requirementFiles[r]);
+      if (missing.length > 0) {
+        setError(`You cannot proceed without uploading all required PDF documents. Missing: ${missing.join(', ')}`);
+        return;
+      }
+    }
+    setStep(step + 1);
+  };
+
   const handleCreate = async () => {
     const clientId = isClient ? myClient?.id : form.client_id;
     if (!clientId) {
@@ -143,8 +215,17 @@ export default function Permits() {
       setStep(0);
       return;
     }
+    const missing = requiredDocs.filter((r) => !requirementFiles[r]);
+    if (missing.length > 0) {
+      setError(`Please upload all required PDF documents. Missing: ${missing.join(', ')}`);
+      setStep(1);
+      return;
+    }
+
+    setSubmitting(true);
+    setError('');
     try {
-      await api.createPermit({
+      const created = await api.createPermit({
         ...form,
         client_id: Number(clientId),
         assigned_staff_id: !isClient && form.assigned_staff_id
@@ -153,11 +234,30 @@ export default function Permits() {
         total_floor_area: Number(form.total_floor_area || 0),
         num_storeys: Number(form.num_storeys || 1),
       });
+
+      const detail = await api.getPermit(created.id);
+      const reqs = detail.requirements || [];
+      for (const reqName of requiredDocs) {
+        const file = requirementFiles[reqName];
+        if (!file) continue;
+        const matchedReq = reqs.find((r) => r.requirement_name === reqName);
+        const fd = new FormData();
+        fd.append('file', file);
+        fd.append('document_type', reqName);
+        if (matchedReq) fd.append('requirement_id', String(matchedReq.id));
+        await api.uploadDocument(created.id, fd);
+        if (matchedReq && !isClient) {
+          await api.updateRequirement(created.id, matchedReq.id, 'submitted');
+        }
+      }
+
       setModal(null);
       setViewSuccess('');
       await load(true);
     } catch (err) {
       setError(err.message);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -331,11 +431,11 @@ export default function Permits() {
         large
         footer={
           <>
-            <button className="btn btn-secondary" onClick={() => setModal(null)}>Cancel</button>
-            {step > 0 && <button className="btn btn-secondary" onClick={() => setStep(step - 1)}>Back</button>}
+            <button className="btn btn-secondary" onClick={() => setModal(null)} disabled={submitting}>Cancel</button>
+            {step > 0 && <button className="btn btn-secondary" onClick={() => { setError(''); setStep(step - 1); }} disabled={submitting}>Back</button>}
             {step < STEPS.length - 1
-              ? <button className="btn btn-primary" onClick={() => setStep(step + 1)}>Next</button>
-              : <button className="btn btn-primary" onClick={handleCreate}>Submit Application</button>}
+              ? <button className="btn btn-primary" onClick={handleNextStep}>Next</button>
+              : <button className="btn btn-primary" onClick={handleCreate} disabled={submitting}>{submitting ? 'Submitting...' : 'Submit Application'}</button>}
           </>
         }
       >
@@ -356,7 +456,7 @@ export default function Permits() {
                 <label>Permit Type</label>
                 <CustomSelect
                   value={form.permit_type}
-                  onChange={(val) => setForm({ ...form, permit_type: val })}
+                  onChange={(val) => { setForm({ ...form, permit_type: val }); setRequirementFiles({}); }}
                   options={Object.entries(PERMIT_TYPES).map(([key, label]) => ({ value: key, label }))}
                   style={{ width: '100%' }}
                 />
@@ -419,19 +519,45 @@ export default function Permits() {
         {step === 1 && (
           <div className="card">
             <div className="card-body">
-              <p style={{ marginBottom: 12 }}>Required documents for <strong>{PERMIT_TYPES[form.permit_type]}</strong> will be created automatically upon submission. You can upload the PDF files after submitting.</p>
-              <ul style={{ paddingLeft: 20 }}>
-                {(form.permit_type === 'building'
-                  ? ['Certified True Copy of Title', 'Tax Declaration', 'Building Plans (Signed & Sealed)', 'Bill of Materials', 'Barangay Clearance', 'Occupancy Permit Application']
-                  : form.permit_type === 'electrical'
-                    ? ['Electrical Plans', 'Load Computation', 'Tax Declaration', 'Barangay Clearance']
-                    : form.permit_type === 'occupancy'
-                      ? ['Building Permit', 'Certificate of Completion', 'Fire Safety Certificate', 'Tax Declaration']
-                      : form.permit_type === 'locational'
-                        ? ['Lot Plan', 'Tax Declaration', 'Barangay Clearance', 'Zoning Clearance']
-                        : ['Application Form', 'Valid ID', 'Tax Declaration']
-                ).map((r) => <li key={r}>{r}</li>)}
-              </ul>
+              <p style={{ marginBottom: 12 }}>
+                Upload all required PDF documents for <strong>{PERMIT_TYPES[form.permit_type]}</strong>. You cannot proceed without uploading every requirement.
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {requiredDocs.map((reqName) => {
+                  const file = requirementFiles[reqName];
+                  return (
+                    <div
+                      key={reqName}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 12,
+                        padding: '10px 12px',
+                        borderRadius: 'var(--radius-subcard)',
+                        border: `1px solid ${file ? 'var(--green-600)' : 'var(--border-color)'}`,
+                        background: file ? 'rgba(22, 163, 74, 0.06)' : 'var(--bg-subcard)',
+                      }}
+                    >
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13.5 }}>{reqName} *</div>
+                        <div style={{ fontSize: 12, color: file ? 'var(--green-800)' : 'var(--text-light)' }}>
+                          {file ? `Uploaded: ${file.name} (${formatFileSize(file.size)})` : 'Required (PDF only, max 10 MB)'}
+                        </div>
+                      </div>
+                      <label className="btn btn-secondary" style={{ cursor: 'pointer', whiteSpace: 'nowrap', margin: 0 }}>
+                        <Icon name="upload" size={14} /> {file ? 'Change PDF' : 'Upload PDF'}
+                        <input
+                          type="file"
+                          accept=".pdf,application/pdf"
+                          style={{ display: 'none' }}
+                          onChange={(e) => handleReqFileChange(reqName, e.target.files?.[0])}
+                        />
+                      </label>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
         )}
@@ -441,12 +567,19 @@ export default function Permits() {
             <div className="card-body">
               <div className="form-row">
                 <div className="form-group">
-                  <label>Estimated Floor Area</label>
-                  <input className="form-control" type="number" value={form.total_floor_area} onChange={(e) => setForm({ ...form, total_floor_area: e.target.value })} />
+                  <label>Estimated Floor Area (sq)</label>
+                  <input
+                    className="form-control"
+                    type="number"
+                    min="0"
+                    placeholder="Enter floor area in sq"
+                    value={form.total_floor_area}
+                    onChange={(e) => setForm({ ...form, total_floor_area: e.target.value })}
+                  />
                 </div>
                 <div className="form-group">
                   <label>Number of Storeys</label>
-                  <input className="form-control" type="number" value={form.num_storeys} onChange={(e) => setForm({ ...form, num_storeys: e.target.value })} />
+                  <input className="form-control" type="number" min="1" value={form.num_storeys} onChange={(e) => setForm({ ...form, num_storeys: e.target.value })} />
                 </div>
               </div>
               <p>Permit fees are calculated from system settings. Payment is only enabled after the Municipal Engineer approves the application.</p>
@@ -697,22 +830,72 @@ export default function Permits() {
 
       <Modal open={modal === 'preview'} onClose={() => setModal(null)} title="Printable Permit Preview" large>
         {previewData && (
-          <div className="permit-document">
-            <div className="doc-header">
-              <h2>{previewData.office.office_name}</h2>
-              <div>{previewData.office.municipality}</div>
-              <div style={{ marginTop: 8, fontWeight: 700 }}>BUILDING PERMIT</div>
+          <>
+            <div className="receipt-actions no-print">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  const permitTitle = (PERMIT_TYPES[previewData.permit.permit_type] || 'PERMIT').toUpperCase();
+                  const headerHtml = buildFormalHeaderHtml({
+                    office: previewData.office,
+                    title: permitTitle,
+                  });
+                  const bodyHtml = `
+                    <div class="receipt-box">
+                      ${headerHtml}
+                      <table class="kv-table">
+                        <tr><td class="kv-key">Application No.</td><td class="kv-val"><strong>${escapeHtml(previewData.permit.application_no)}</strong></td></tr>
+                        <tr><td class="kv-key">Client Name</td><td class="kv-val">${escapeHtml(previewData.permit.client_name)}</td></tr>
+                        <tr><td class="kv-key">Address</td><td class="kv-val">${escapeHtml(previewData.permit.client_address || '-')}</td></tr>
+                        <tr><td class="kv-key">Project Location</td><td class="kv-val">${escapeHtml(previewData.permit.project_location || '-')}</td></tr>
+                        <tr><td class="kv-key">Nature of Construction</td><td class="kv-val">${escapeHtml(previewData.permit.nature_of_construction || '-')}</td></tr>
+                        <tr><td class="kv-key">Estimated Floor Area</td><td class="kv-val">${escapeHtml(previewData.permit.total_floor_area ? `${previewData.permit.total_floor_area} sq` : '-')}</td></tr>
+                        <tr><td class="kv-key">Permit Type</td><td class="kv-val">${escapeHtml(PERMIT_TYPES[previewData.permit.permit_type] || previewData.permit.permit_type)}</td></tr>
+                        <tr><td class="kv-key">Issued Date</td><td class="kv-val">${escapeHtml(formatDate(previewData.permit.issued_date))}</td></tr>
+                      </table>
+                      <div class="qr-wrap"><img src="${previewData.qrCode}" alt="QR Code" /></div>
+                      <div class="signatory-grid">
+                        <div class="sig-block" style="max-width: 260px; margin-left: auto;">
+                          <div class="sig-line">${escapeHtml(previewData.office.municipal_engineer || 'Municipal Engineer')}</div>
+                          <div class="sig-role">Municipal Engineer</div>
+                        </div>
+                      </div>
+                    </div>
+                  `;
+                  printDocumentHtml({
+                    title: `${permitTitle} - ${previewData.permit.application_no}`,
+                    bodyHtml,
+                  });
+                }}
+              >
+                <Icon name="print" size={16} /> Print Permit
+              </button>
             </div>
-            <div className="doc-field"><span className="label">Application No.</span><span>{previewData.permit.application_no}</span></div>
-            <div className="doc-field"><span className="label">Client Name</span><span>{previewData.permit.client_name}</span></div>
-            <div className="doc-field"><span className="label">Address</span><span>{previewData.permit.client_address}</span></div>
-            <div className="doc-field"><span className="label">Project Location</span><span>{previewData.permit.project_location}</span></div>
-            <div className="doc-field"><span className="label">Nature of Construction</span><span>{previewData.permit.nature_of_construction}</span></div>
-            <div className="doc-field"><span className="label">Permit Type</span><span>{PERMIT_TYPES[previewData.permit.permit_type]}</span></div>
-            <div className="doc-field"><span className="label">Issued Date</span><span>{formatDate(previewData.permit.issued_date)}</span></div>
-            <div className="qr"><img src={previewData.qrCode} alt="QR Code" style={{ width: 130, height: 130 }} /></div>
-            <div className="signature">{previewData.office.municipal_engineer}<br />Municipal Engineer</div>
-          </div>
+            <div className="permit-document">
+              <div className="doc-header">
+                <div style={{ background: 'var(--gumaca-maroon)', padding: '12px 18px', borderRadius: 10, marginBottom: 12, display: 'flex', justifyContent: 'center' }}>
+                  <img
+                    src="/gumacalogo.png"
+                    alt="Municipality of Gumaca"
+                    style={{ display: 'block', maxHeight: 62, width: 'auto', objectFit: 'contain' }}
+                  />
+                </div>
+                <h2>{previewData.office.office_name}</h2>
+                <div style={{ marginTop: 8, fontWeight: 700 }}>{(PERMIT_TYPES[previewData.permit.permit_type] || 'BUILDING PERMIT').toUpperCase()}</div>
+              </div>
+              <div className="doc-field"><span className="label">Application No.</span><span>{previewData.permit.application_no}</span></div>
+              <div className="doc-field"><span className="label">Client Name</span><span>{previewData.permit.client_name}</span></div>
+              <div className="doc-field"><span className="label">Address</span><span>{previewData.permit.client_address}</span></div>
+              <div className="doc-field"><span className="label">Project Location</span><span>{previewData.permit.project_location}</span></div>
+              <div className="doc-field"><span className="label">Nature of Construction</span><span>{previewData.permit.nature_of_construction}</span></div>
+              <div className="doc-field"><span className="label">Estimated Floor Area</span><span>{previewData.permit.total_floor_area ? `${previewData.permit.total_floor_area} sq` : '-'}</span></div>
+              <div className="doc-field"><span className="label">Permit Type</span><span>{PERMIT_TYPES[previewData.permit.permit_type]}</span></div>
+              <div className="doc-field"><span className="label">Issued Date</span><span>{formatDate(previewData.permit.issued_date)}</span></div>
+              <div className="qr"><img src={previewData.qrCode} alt="QR Code" style={{ width: 130, height: 130 }} /></div>
+              <div className="signature">{previewData.office.municipal_engineer}<br />Municipal Engineer</div>
+            </div>
+          </>
         )}
       </Modal>
 

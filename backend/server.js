@@ -15,6 +15,7 @@ const reportRoutes = require('./routes/reports');
 const auditRoutes = require('./routes/audit');
 const settingsRoutes = require('./routes/settings');
 const notificationRoutes = require('./routes/notifications');
+const publicRoutes = require('./routes/public');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -34,6 +35,7 @@ app.use('/api/audit', auditRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/documents', documentRoutes);
+app.use('/api/public', publicRoutes);
 
 function lanAddresses() {
   const ips = [];

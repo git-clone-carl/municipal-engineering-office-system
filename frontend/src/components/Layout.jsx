@@ -65,6 +65,18 @@ export default function Layout() {
     }
   };
 
+  const handleNotificationClick = async (notification) => {
+    await markRead(notification);
+    setShowNotifications(false);
+    if (notification.permit_id) {
+      if (user?.role === 'cashier' && hasAccess('payments')) {
+        navigate('/payments');
+      } else if (hasAccess('permits')) {
+        navigate(`/permits?open=${notification.permit_id}`);
+      }
+    }
+  };
+
   const markAllRead = async () => {
     try {
       await api.markAllNotificationsRead();
@@ -161,7 +173,8 @@ export default function Layout() {
                         type="button"
                         key={notification.id}
                         className={`notification-item ${notification.is_read ? '' : 'unread'} type-${notification.type || 'info'}`}
-                        onClick={() => markRead(notification)}
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => handleNotificationClick(notification)}
                       >
                         <div className="notification-item-title">{notification.title}</div>
                         <div className="notification-item-message">{notification.message}</div>
