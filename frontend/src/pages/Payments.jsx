@@ -10,8 +10,8 @@ const emptyForm = { permit_id: '', amount: '', payment_method: 'cash', notes: ''
 
 export default function Payments() {
   const { user } = useAuth();
-  const isCashier = user?.role === 'cashier';
-  const canSeePending = ['cashier', 'admin'].includes(user?.role);
+  const canProcessPayment = ['admin', 'engineering_staff'].includes(user?.role);
+  const canSeePending = ['admin', 'engineering_staff'].includes(user?.role);
 
   const [payments, setPayments] = useState([]);
   const [pending, setPending] = useState([]);
@@ -139,7 +139,7 @@ export default function Payments() {
     <div>
       <h1 className="page-title">Payments</h1>
       <p className="page-subtitle">
-        {isCashier
+        {canProcessPayment
           ? 'Process payments for engineer-approved applications and print official receipts'
           : 'View payment transactions and official receipts'}
       </p>
@@ -178,12 +178,12 @@ export default function Payments() {
                       <td>{p.approved_by_name || '-'}</td>
                       <td>{formatDateTime(p.approved_at)}</td>
                       <td>
-                        {isCashier ? (
+                        {canProcessPayment ? (
                           <button className="btn btn-primary btn-sm" onClick={() => openRecord(p)}>
                             <Icon name="payments" size={14} /> Process Payment
                           </button>
                         ) : (
-                          <span className="doc-meta">Cashier action</span>
+                          <span className="doc-meta">Staff action</span>
                         )}
                       </td>
                     </tr>
@@ -199,7 +199,7 @@ export default function Payments() {
         <div className="toolbar-left">
           <input className="form-control" style={{ width: 260 }} placeholder="Search OR, client, application..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
         </div>
-        {isCashier && (
+        {canProcessPayment && (
           <button className="btn btn-primary" onClick={() => openRecord()}>
             <Icon name="plus" size={16} /> Record Payment
           </button>
@@ -218,7 +218,7 @@ export default function Payments() {
                   <th>Application</th>
                   <th>Permit Type</th>
                   <th>Amount</th>
-                  <th>Cashier</th>
+                  <th>Processed By</th>
                   <th>Action</th>
                 </tr>
               </thead>
@@ -328,7 +328,7 @@ export default function Payments() {
           <textarea className="form-control" rows={3} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
         </div>
         <p className="page-subtitle">
-          The backend verifies the application is Approved, fully unpaid and that you are signed in as Cashier.
+          The backend verifies the application is Approved, fully unpaid, and that you are signed in as System Admin or WNGR Staff.
         </p>
       </Modal>
 

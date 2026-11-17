@@ -69,9 +69,7 @@ export default function Layout() {
     await markRead(notification);
     setShowNotifications(false);
     if (notification.permit_id) {
-      if (user?.role === 'cashier' && hasAccess('payments')) {
-        navigate('/payments');
-      } else if (hasAccess('permits')) {
+      if (hasAccess('permits')) {
         navigate(`/permits?open=${notification.permit_id}`);
       }
     }

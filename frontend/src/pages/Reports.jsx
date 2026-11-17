@@ -99,7 +99,7 @@ export default function Reports() {
               <th>Client / Payor</th>
               <th>Permit Type</th>
               <th class="num">Amount</th>
-              <th>Cashier</th>
+              <th>Processed By</th>
             </tr>
           </thead>
           <tbody>
@@ -244,7 +244,7 @@ export default function Reports() {
 
       const detailRows = [
         ...makeHeader('COLLECTION REPORT - DETAILED TRANSACTIONS'),
-        ['OR No.', 'Date & Time', 'Client / Payor', 'Permit Type', 'Amount (PHP)', 'Cashier'],
+        ['OR No.', 'Date & Time', 'Client / Payor', 'Permit Type', 'Amount (PHP)', 'Processed By'],
         ...data.details.map((r) => [
           r.or_number,
           formatDateTime(r.payment_date),
@@ -378,7 +378,7 @@ export default function Reports() {
             <div className="table-wrap">
               <table>
                 <thead>
-                  <tr><th>OR No.</th><th>Date</th><th>Client</th><th>Permit Type</th><th>Amount</th><th>Cashier</th></tr>
+                  <tr><th>OR No.</th><th>Date</th><th>Client</th><th>Permit Type</th><th>Amount</th><th>Processed By</th></tr>
                 </thead>
                 <tbody>
                   {data.details.map((row) => (

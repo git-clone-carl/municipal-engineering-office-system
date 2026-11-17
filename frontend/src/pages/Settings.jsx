@@ -144,8 +144,8 @@ export default function Settings() {
             </div>
             <div className="form-row">
               <div className="form-group">
-                <label>Locational Clearance Fee</label>
-                <input className="form-control" value={system.permit_fee_locational || ''} onChange={(e) => setSystem({ ...system, permit_fee_locational: e.target.value })} />
+                <label>Certificate of Annual Inspection Fee</label>
+                <input className="form-control" value={system.permit_fee_annual_inspection || ''} onChange={(e) => setSystem({ ...system, permit_fee_annual_inspection: e.target.value })} />
               </div>
               <div className="form-group">
                 <label>Certificate Fee</label>

@@ -51,8 +51,6 @@ export default function Dashboard() {
   let queueMessage = '';
   if (user?.role === 'municipal_engineer') {
     queueMessage = `${stats.forApproval} application${stats.forApproval === 1 ? '' : 's'} awaiting your approval`;
-  } else if (user?.role === 'cashier') {
-    queueMessage = `${stats.awaitingPayment} approved application${stats.awaitingPayment === 1 ? '' : 's'} awaiting payment`;
   } else if (isClient) {
     queueMessage = `${stats.pendingRequests} application${stats.pendingRequests === 1 ? '' : 's'} in progress`;
   } else if (['admin', 'engineering_staff'].includes(user?.role)) {

@@ -5,28 +5,15 @@ const { notifyRole } = require('../middleware/access');
 const {
   uploadMultiplePdfs, isPdfSignature, removeUploadedFiles,
 } = require('../middleware/upload');
+const {
+  PERMIT_TYPES, PERMIT_PREFIXES, ELECTRICAL_SUBTYPES,
+  ELECTRICAL_REQUIREMENTS, DEFAULT_REQUIREMENTS, getRequirementsForPermit,
+} = require('../constants/permits');
 
 const router = express.Router();
 
-const DEFAULT_REQUIREMENTS = {
-  building: [
-    'Certified True Copy of Title',
-    'Tax Declaration',
-    'Building Plans (Signed & Sealed)',
-    'Bill of Materials',
-    'Barangay Clearance',
-    'Occupancy Permit Application',
-  ],
-  electrical: ['Electrical Plans', 'Load Computation', 'Tax Declaration', 'Barangay Clearance'],
-  occupancy: ['Building Permit', 'Certificate of Completion', 'Fire Safety Certificate', 'Tax Declaration'],
-  locational: ['Lot Plan', 'Tax Declaration', 'Barangay Clearance', 'Zoning Clearance'],
-  certificate: ['Application Form', 'Valid ID', 'Tax Declaration'],
-};
-
-const PERMIT_TYPES = ['building', 'electrical', 'occupancy', 'locational', 'certificate'];
-
 function generateAppNo(type) {
-  const prefix = { building: 'BP', electrical: 'EP', occupancy: 'OP', locational: 'LP', certificate: 'CP' }[type] || 'AP';
+  const prefix = PERMIT_PREFIXES[type] || 'AP';
   const year = new Date().getFullYear();
   let sequence = db.prepare('SELECT COUNT(*) AS c FROM permits WHERE permit_type = ?').get(type).c + 1;
   let applicationNo = `${prefix}-${year}-${String(sequence).padStart(4, '0')}`;
@@ -66,7 +53,11 @@ function getFee(type) {
 
 router.get('/requirements', (_req, res) => {
   const office = db.prepare('SELECT office_name, municipality, address, contact_number FROM office_info WHERE id = 1').get();
-  res.json({ requirements: DEFAULT_REQUIREMENTS, office });
+  res.json({
+    requirements: DEFAULT_REQUIREMENTS,
+    electricalSubtypes: ELECTRICAL_REQUIREMENTS,
+    office,
+  });
 });
 
 router.post('/apply', uploadMultiplePdfs, (req, res) => {
@@ -82,6 +73,7 @@ router.post('/apply', uploadMultiplePdfs, (req, res) => {
     email,
     address,
     permit_type,
+    electrical_subtype,
     application_date,
     project_location,
     nature_of_construction,
@@ -113,7 +105,10 @@ router.post('/apply', uploadMultiplePdfs, (req, res) => {
     return fail(400, 'Invalid requirements metadata.');
   }
 
-  const expectedReqs = DEFAULT_REQUIREMENTS[permit_type] || [];
+  const resolvedSubtype = permit_type === 'electrical'
+    ? (ELECTRICAL_SUBTYPES.includes(electrical_subtype) ? electrical_subtype : 'electrification')
+    : null;
+  const expectedReqs = getRequirementsForPermit(permit_type, resolvedSubtype);
   if (files.length !== requirementNames.length) {
     return fail(400, 'Uploaded files do not match the requirements list.');
   }
@@ -168,13 +163,14 @@ router.post('/apply', uploadMultiplePdfs, (req, res) => {
 
     const permitRes = db.prepare(`
       INSERT INTO permits (
-        application_no, permit_type, client_id, application_date, project_location,
+        application_no, permit_type, electrical_subtype, client_id, application_date, project_location,
         nature_of_construction, building_type, total_floor_area, num_storeys,
         assigned_staff_id, total_fee, notes
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
     `).run(
       application_no,
       permit_type,
+      resolvedSubtype,
       clientId,
       application_date || new Date().toISOString().split('T')[0],
       cleanLocation,

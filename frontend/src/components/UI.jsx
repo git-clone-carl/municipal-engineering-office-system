@@ -346,20 +346,15 @@ export function timeAgo(d) {
   return formatDate(d);
 }
 
+import { PERMIT_TYPES } from '../constants/permits';
+
+export { PERMIT_TYPES };
+
 export const ROLE_LABELS = {
   admin: 'System Administrator',
   municipal_engineer: 'Municipal Engineer',
   engineering_staff: 'WNGR Staff',
-  cashier: 'Cashier',
   viewer: 'Client',
-};
-
-export const PERMIT_TYPES = {
-  building: 'Building Permit',
-  electrical: 'Electrical Permit',
-  occupancy: 'Occupancy Permit',
-  locational: 'Locational Clearance',
-  certificate: 'Certificate',
 };
 
 export const STATUS_LABELS = {

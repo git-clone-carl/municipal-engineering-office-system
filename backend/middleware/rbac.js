@@ -1,6 +1,6 @@
 const db = require('../database/db');
 
-const ROLE_KEYS = ['admin', 'engineering_staff', 'cashier', 'municipal_engineer', 'viewer'];
+const ROLE_KEYS = ['admin', 'engineering_staff', 'municipal_engineer', 'viewer'];
 
 /** Hard role gate for actions that must never be delegated through the RBAC matrix. */
 function requireRole(...allowed) {

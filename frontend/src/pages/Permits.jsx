@@ -7,29 +7,16 @@ import {
   formatDateTime, formatFileSize, CustomSelect, CustomDatePicker,
   printDocumentHtml, buildFormalHeaderHtml, escapeHtml,
 } from '../components/UI';
+import { ELECTRICAL_SUBTYPES, getRequirementsForPermit } from '../constants/permits';
 import DocumentsPanel from '../components/DocumentsPanel';
 import Receipt from '../components/Receipt';
 
 const STEPS = ['Application Details', 'Requirements', 'Payment', 'Review'];
 const STATUS_FLOW = ['submitted', 'for_review', 'for_approval', 'approved', 'paid', 'released'];
 
-const PERMIT_REQUIREMENTS_MAP = {
-  building: [
-    'Certified True Copy of Title',
-    'Tax Declaration',
-    'Building Plans (Signed & Sealed)',
-    'Bill of Materials',
-    'Barangay Clearance',
-    'Occupancy Permit Application',
-  ],
-  electrical: ['Electrical Plans', 'Load Computation', 'Tax Declaration', 'Barangay Clearance'],
-  occupancy: ['Building Permit', 'Certificate of Completion', 'Fire Safety Certificate', 'Tax Declaration'],
-  locational: ['Lot Plan', 'Tax Declaration', 'Barangay Clearance', 'Zoning Clearance'],
-  certificate: ['Application Form', 'Valid ID', 'Tax Declaration'],
-};
-
 const emptyForm = {
   permit_type: 'building',
+  electrical_subtype: 'electrification',
   client_id: '',
   application_date: new Date().toISOString().split('T')[0],
   project_location: '',
@@ -169,7 +156,7 @@ export default function Permits() {
     }
   };
 
-  const requiredDocs = PERMIT_REQUIREMENTS_MAP[form.permit_type] || [];
+  const requiredDocs = getRequirementsForPermit(form.permit_type, form.electrical_subtype);
 
   const handleReqFileChange = (reqName, file) => {
     setError('');
@@ -309,7 +296,7 @@ export default function Permits() {
       await load(true);
       await refreshSelected();
       setViewSuccess(decision === 'approve'
-        ? 'Application approved. The Cashier can now process the payment.'
+        ? 'Application approved. Payment can now be processed.'
         : 'Application rejected. The client has been notified.');
     } catch (err) {
       setDecisionError(err.message);
@@ -470,6 +457,17 @@ export default function Permits() {
                 />
               </div>
             </div>
+            {form.permit_type === 'electrical' && (
+              <div className="form-group">
+                <label>Electrical Application Type</label>
+                <CustomSelect
+                  value={form.electrical_subtype}
+                  onChange={(val) => { setForm({ ...form, electrical_subtype: val }); setRequirementFiles({}); }}
+                  options={Object.entries(ELECTRICAL_SUBTYPES).map(([key, label]) => ({ value: key, label }))}
+                  style={{ width: '100%' }}
+                />
+              </div>
+            )}
             {isClient ? (
               <div className="form-group">
                 <label>Applicant</label>
@@ -659,6 +657,12 @@ export default function Permits() {
                     <div className="doc-field"><span className="label">Client</span><span>{selectedPermit.client_name}</span></div>
                     <div className="doc-field"><span className="label">Permit Type</span><span>{PERMIT_TYPES[selectedPermit.permit_type]}</span></div>
                     <div className="doc-field"><span className="label">Application Date</span><span>{formatDate(selectedPermit.application_date)}</span></div>
+                    {selectedPermit.permit_type === 'electrical' && selectedPermit.electrical_subtype && (
+                      <div className="doc-field">
+                        <span className="label">Electrical Type</span>
+                        <span>{ELECTRICAL_SUBTYPES[selectedPermit.electrical_subtype] || selectedPermit.electrical_subtype}</span>
+                      </div>
+                    )}
                     <div className="doc-field"><span className="label">Project Location</span><span>{selectedPermit.project_location || '-'}</span></div>
                     <div className="doc-field"><span className="label">Assigned Staff</span><span>{selectedPermit.assigned_staff_name || '-'}</span></div>
                     <div className="doc-field"><span className="label">Status</span><span><span className={`badge badge-${selectedPermit.status}`}>{STATUS_LABELS[selectedPermit.status] || selectedPermit.status}</span></span></div>
@@ -811,7 +815,7 @@ export default function Permits() {
         {decisionError && <div className="login-error">{decisionError}</div>}
         <p style={{ marginBottom: 12 }}>
           {decision === 'approve'
-            ? 'The application status will be updated to Approved and the Cashier will be allowed to process payment.'
+            ? 'The application status will be updated to Approved and payment will be allowed.'
             : 'The application status will be updated to Rejected and the client will be notified.'}
         </p>
         <div className="form-group">

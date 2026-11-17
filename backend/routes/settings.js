@@ -49,11 +49,11 @@ router.get('/rbac', authenticate, checkPermission('rbac'), (req, res) => {
 router.put('/rbac', authenticate, checkPermission('rbac'), (req, res) => {
   const { permissions } = req.body;
   const update = db.prepare(`
-    UPDATE role_permissions SET admin=1, engineering_staff=?, cashier=?, municipal_engineer=?, viewer=?
+    UPDATE role_permissions SET admin=1, engineering_staff=?, municipal_engineer=?, viewer=?
     WHERE module=?
   `);
   for (const p of permissions) {
-    update.run(p.engineering_staff, p.cashier, p.municipal_engineer, p.viewer, p.module);
+    update.run(p.engineering_staff, p.municipal_engineer, p.viewer, p.module);
   }
   logAudit(req.user.id, req.user.username, req.user.role, 'Updated RBAC permissions', getClientIp(req));
   res.json({ success: true });

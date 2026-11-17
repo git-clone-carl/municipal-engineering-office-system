@@ -60,7 +60,7 @@ export default function Receipt({ data }) {
         <div class="signatory-grid">
           <div class="sig-block left" style="max-width: 260px;">
             <div class="sig-line">${escapeHtml(payment.cashier_name || '-')}</div>
-            <div class="sig-role">Cashier${payment.cashier_code ? ` (${escapeHtml(payment.cashier_code)})` : ''}</div>
+            <div class="sig-role">Processed By${payment.cashier_code ? ` (${escapeHtml(payment.cashier_code)})` : ''}</div>
           </div>
         </div>
 
@@ -137,7 +137,7 @@ export default function Receipt({ data }) {
         <div className="receipt-footer">
           <div className="signature">
             <strong>{payment.cashier_name || '-'}</strong><br />
-            Cashier{payment.cashier_code ? ` (${payment.cashier_code})` : ''}
+            Processed By{payment.cashier_code ? ` (${payment.cashier_code})` : ''}
           </div>
           <div className="receipt-note">
             This is a system-generated official receipt. Keep this receipt for your records.

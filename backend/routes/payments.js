@@ -65,7 +65,7 @@ router.get('/', authenticate, checkPermission('payments'), (req, res) => {
  * of these checks server-side before accepting money.
  */
 router.get('/pending', authenticate, checkPermission('payments'),
-  requireRole('admin', 'cashier'), (req, res) => {
+  requireRole('admin', 'engineering_staff'), (req, res) => {
     const permits = db.prepare(`
       SELECT p.id, p.application_no, p.permit_type, p.status, p.total_fee, p.amount_paid,
              p.approved_at, c.full_name AS client_name, c.client_id AS client_code,
@@ -99,7 +99,7 @@ router.get('/permit/:permitId', authenticate, checkPermission('payments'), (req,
 });
 
 router.post('/', authenticate, checkPermission('payments'),
-  requireRole('cashier'), (req, res, next) => {
+  requireRole('admin', 'engineering_staff'), (req, res, next) => {
     const { permit_id, amount, payment_method = 'cash', notes } = req.body;
 
     const permitId = Number(permit_id);
@@ -195,7 +195,7 @@ router.get('/:id/receipt', authenticate, (req, res) => {
   `).get(req.params.id);
   if (!payment) return res.status(404).json({ error: 'Payment not found' });
 
-  const allowedRoles = ['admin', 'cashier', 'municipal_engineer'];
+  const allowedRoles = ['admin', 'engineering_staff', 'municipal_engineer'];
   let allowed = allowedRoles.includes(req.user.role);
   if (!allowed && req.user.role === 'viewer') {
     const client = getOwnClient(req.user.id);

@@ -5,6 +5,9 @@ import {
   Modal, CustomSelect, CustomDatePicker, Icon,
   PERMIT_TYPES, formatCurrency, formatFileSize,
 } from '../components/UI';
+import {
+  ELECTRICAL_SUBTYPES, ELECTRICAL_REQUIREMENTS, FALLBACK_REQUIREMENTS, getRequirementsForPermit,
+} from '../constants/permits';
 import bg1 from '../bg/b1.jpg';
 import bg2 from '../bg/b2.jpg';
 import bg3 from '../bg/b3.jpg';
@@ -14,21 +17,6 @@ import bg6 from '../bg/b6.jpg';
 
 const BACKGROUNDS = [bg1, bg2, bg3, bg4, bg5, bg6];
 
-const FALLBACK_REQUIREMENTS = {
-  building: [
-    'Certified True Copy of Title',
-    'Tax Declaration',
-    'Building Plans (Signed & Sealed)',
-    'Bill of Materials',
-    'Barangay Clearance',
-    'Occupancy Permit Application',
-  ],
-  electrical: ['Electrical Plans', 'Load Computation', 'Tax Declaration', 'Barangay Clearance'],
-  occupancy: ['Building Permit', 'Certificate of Completion', 'Fire Safety Certificate', 'Tax Declaration'],
-  locational: ['Lot Plan', 'Tax Declaration', 'Barangay Clearance', 'Zoning Clearance'],
-  certificate: ['Application Form', 'Valid ID', 'Tax Declaration'],
-};
-
 const FORM_STEPS = ['Applicant & Permit Details', 'Upload Requirements', 'Review & Submit'];
 
 const createEmptyClientForm = () => ({
@@ -37,6 +25,7 @@ const createEmptyClientForm = () => ({
   email: '',
   address: '',
   permit_type: 'building',
+  electrical_subtype: 'electrification',
   application_date: new Date().toISOString().split('T')[0],
   project_location: '',
   nature_of_construction: '',
@@ -53,6 +42,7 @@ export default function Login() {
   const [step, setStep] = useState(0);
   const [clientForm, setClientForm] = useState(createEmptyClientForm);
   const [requirementsMap, setRequirementsMap] = useState(FALLBACK_REQUIREMENTS);
+  const [electricalSubtypesMap, setElectricalSubtypesMap] = useState(ELECTRICAL_REQUIREMENTS);
   const [requirementFiles, setRequirementFiles] = useState({});
   const [formError, setFormError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -79,6 +69,7 @@ export default function Login() {
     api.getPublicRequirements()
       .then((res) => {
         if (res?.requirements) setRequirementsMap(res.requirements);
+        if (res?.electricalSubtypes) setElectricalSubtypesMap(res.electricalSubtypes);
       })
       .catch(() => {});
   }, []);
@@ -88,7 +79,12 @@ export default function Login() {
     return () => clearInterval(timer);
   }, []);
 
-  const requiredDocs = requirementsMap[clientForm.permit_type] || FALLBACK_REQUIREMENTS[clientForm.permit_type] || [];
+  const requiredDocs = getRequirementsForPermit(
+    clientForm.permit_type,
+    clientForm.electrical_subtype,
+    requirementsMap,
+    electricalSubtypesMap,
+  );
 
   const handleReqFileChange = (reqName, file) => {
     setFormError('');
@@ -337,6 +333,32 @@ export default function Login() {
                         style={{ width: '100%' }}
                       />
                     </div>
+                    {clientForm.permit_type === 'electrical' ? (
+                      <div className="form-group">
+                        <label>Electrical Application Type *</label>
+                        <CustomSelect
+                          value={clientForm.electrical_subtype}
+                          onChange={(val) => {
+                            setClientForm({ ...clientForm, electrical_subtype: val });
+                            setRequirementFiles({});
+                          }}
+                          options={Object.entries(ELECTRICAL_SUBTYPES).map(([key, label]) => ({ value: key, label }))}
+                          style={{ width: '100%' }}
+                        />
+                      </div>
+                    ) : (
+                      <div className="form-group">
+                        <label>Application Date</label>
+                        <CustomDatePicker
+                          value={clientForm.application_date}
+                          onChange={(val) => setClientForm({ ...clientForm, application_date: val })}
+                          style={{ width: '100%' }}
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {clientForm.permit_type === 'electrical' && (
                     <div className="form-group">
                       <label>Application Date</label>
                       <CustomDatePicker
@@ -345,7 +367,7 @@ export default function Login() {
                         style={{ width: '100%' }}
                       />
                     </div>
-                  </div>
+                  )}
 
                   <div className="form-group">
                     <label>Project Location *</label>
@@ -472,7 +494,15 @@ export default function Login() {
                     <div className="doc-field"><span className="label">Full Name</span><span>{clientForm.full_name}</span></div>
                     <div className="doc-field"><span className="label">Contact Number</span><span>{clientForm.contact_number}</span></div>
                     <div className="doc-field"><span className="label">Address</span><span>{clientForm.address}</span></div>
-                    <div className="doc-field"><span className="label">Permit Type</span><span>{PERMIT_TYPES[clientForm.permit_type]}</span></div>
+                    <div className="doc-field">
+                      <span className="label">Permit Type</span>
+                      <span>
+                        {PERMIT_TYPES[clientForm.permit_type]}
+                        {clientForm.permit_type === 'electrical' && ELECTRICAL_SUBTYPES[clientForm.electrical_subtype]
+                          ? ` — ${ELECTRICAL_SUBTYPES[clientForm.electrical_subtype]}`
+                          : ''}
+                      </span>
+                    </div>
                     <div className="doc-field"><span className="label">Project Location</span><span>{clientForm.project_location}</span></div>
                     <div className="doc-field">
                       <span className="label">Estimated Floor Area (sq)</span>

@@ -18,7 +18,7 @@ const SCHEMA_SQL = `
     username TEXT UNIQUE NOT NULL,
     password TEXT NOT NULL,
     full_name TEXT NOT NULL,
-    role TEXT NOT NULL CHECK(role IN ('admin', 'engineering_staff', 'cashier', 'municipal_engineer', 'viewer')),
+    role TEXT NOT NULL CHECK(role IN ('admin', 'engineering_staff', 'municipal_engineer', 'viewer')),
     status TEXT NOT NULL DEFAULT 'active',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -40,7 +40,8 @@ const SCHEMA_SQL = `
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     application_no TEXT UNIQUE NOT NULL,
     client_id INTEGER NOT NULL REFERENCES clients(id),
-    permit_type TEXT NOT NULL CHECK(permit_type IN ('building', 'electrical', 'occupancy', 'locational', 'certificate')),
+    permit_type TEXT NOT NULL CHECK(permit_type IN ('building', 'electrical', 'occupancy', 'annual_inspection', 'certificate')),
+    electrical_subtype TEXT,
     application_date DATE DEFAULT (date('now')),
     project_location TEXT,
     nature_of_construction TEXT,
@@ -132,7 +133,6 @@ const SCHEMA_SQL = `
     module TEXT UNIQUE NOT NULL,
     admin INTEGER NOT NULL DEFAULT 0,
     engineering_staff INTEGER NOT NULL DEFAULT 0,
-    cashier INTEGER NOT NULL DEFAULT 0,
     municipal_engineer INTEGER NOT NULL DEFAULT 0,
     viewer INTEGER NOT NULL DEFAULT 0
   );
@@ -209,6 +209,7 @@ const ADDITIVE_COLUMNS = {
   },
   permits: {
     application_no: 'TEXT',
+    electrical_subtype: 'TEXT',
     application_date: 'DATE',
     project_location: 'TEXT',
     nature_of_construction: 'TEXT',
@@ -286,7 +287,6 @@ const ADDITIVE_COLUMNS = {
   role_permissions: {
     admin: 'INTEGER DEFAULT 0',
     engineering_staff: 'INTEGER DEFAULT 0',
-    cashier: 'INTEGER DEFAULT 0',
     municipal_engineer: 'INTEGER DEFAULT 0',
     viewer: 'INTEGER DEFAULT 0',
   },
@@ -314,15 +314,15 @@ const BACKFILL_SQL = [
 // Role / module matrix used both for seeding and for the RBAC screen.
 // (users, settings and rbac modules are reserved for the System Administrator.)
 const ROLE_MODULES = [
-  { module: 'dashboard', admin: 1, engineering_staff: 1, cashier: 1, municipal_engineer: 1, viewer: 1 },
-  { module: 'clients', admin: 1, engineering_staff: 1, cashier: 0, municipal_engineer: 1, viewer: 0 },
-  { module: 'permits', admin: 1, engineering_staff: 1, cashier: 0, municipal_engineer: 1, viewer: 1 },
-  { module: 'payments', admin: 1, engineering_staff: 0, cashier: 1, municipal_engineer: 1, viewer: 0 },
-  { module: 'reports', admin: 1, engineering_staff: 1, cashier: 1, municipal_engineer: 1, viewer: 0 },
-  { module: 'audit_logs', admin: 1, engineering_staff: 0, cashier: 0, municipal_engineer: 1, viewer: 0 },
-  { module: 'users', admin: 1, engineering_staff: 0, cashier: 0, municipal_engineer: 0, viewer: 0 },
-  { module: 'settings', admin: 1, engineering_staff: 0, cashier: 0, municipal_engineer: 0, viewer: 0 },
-  { module: 'rbac', admin: 1, engineering_staff: 0, cashier: 0, municipal_engineer: 0, viewer: 0 },
+  { module: 'dashboard', admin: 1, engineering_staff: 1, municipal_engineer: 1, viewer: 1 },
+  { module: 'clients', admin: 1, engineering_staff: 1, municipal_engineer: 1, viewer: 0 },
+  { module: 'permits', admin: 1, engineering_staff: 1, municipal_engineer: 1, viewer: 1 },
+  { module: 'payments', admin: 1, engineering_staff: 1, municipal_engineer: 1, viewer: 0 },
+  { module: 'reports', admin: 1, engineering_staff: 1, municipal_engineer: 1, viewer: 0 },
+  { module: 'audit_logs', admin: 1, engineering_staff: 0, municipal_engineer: 1, viewer: 0 },
+  { module: 'users', admin: 1, engineering_staff: 0, municipal_engineer: 0, viewer: 0 },
+  { module: 'settings', admin: 1, engineering_staff: 0, municipal_engineer: 0, viewer: 0 },
+  { module: 'rbac', admin: 1, engineering_staff: 0, municipal_engineer: 0, viewer: 0 },
 ];
 
 // Seeded once, only when the users table is empty.
@@ -330,7 +330,6 @@ const DEMO_USERS = [
   { username: 'admin', password: 'admin123', full_name: 'System Administrator', role: 'admin', user_id: 'USR-001' },
   { username: 'engineer', password: 'engineer123', full_name: 'Engr. Juan Dela Cruz', role: 'municipal_engineer', user_id: 'USR-002' },
   { username: 'staff', password: 'staff123', full_name: 'Engr. Maria Santos', role: 'engineering_staff', user_id: 'USR-003' },
-  { username: 'cashier', password: 'cashier123', full_name: 'Ana Reyes', role: 'cashier', user_id: 'USR-004' },
   { username: 'viewer', password: 'viewer123', full_name: 'Pedro Penduko', role: 'viewer', user_id: 'USR-005' },
 ];
 
@@ -354,7 +353,7 @@ function defaultSettings() {
     permit_fee_building: '5000',
     permit_fee_electrical: '2000',
     permit_fee_occupancy: '1500',
-    permit_fee_locational: '1000',
+    permit_fee_annual_inspection: '1000',
     permit_fee_certificate: '500',
   };
 }
@@ -430,7 +429,8 @@ const PERMITS_MIGRATION_SQL = `
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     application_no TEXT UNIQUE NOT NULL,
     client_id INTEGER NOT NULL REFERENCES clients(id),
-    permit_type TEXT NOT NULL CHECK(permit_type IN ('building', 'electrical', 'occupancy', 'locational', 'certificate')),
+    permit_type TEXT NOT NULL CHECK(permit_type IN ('building', 'electrical', 'occupancy', 'annual_inspection', 'certificate')),
+    electrical_subtype TEXT,
     application_date DATE DEFAULT (date('now')),
     project_location TEXT,
     nature_of_construction TEXT,
@@ -458,7 +458,7 @@ const PERMITS_MIGRATION_SQL = `
 function migratePermitsStatusCheck(db) {
   if (!tableExists(db, 'permits')) return false;
   const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'permits'").get();
-  if (!row || !row.sql || row.sql.includes("'paid'")) return false;
+  if (!row || !row.sql || (row.sql.includes("'paid'") && row.sql.includes("'annual_inspection'"))) return false;
 
   db.exec('PRAGMA foreign_keys = OFF');
   db.exec('BEGIN IMMEDIATE');
@@ -470,6 +470,7 @@ function migratePermitsStatusCheck(db) {
     const common = oldColumns.filter((c) => newColumns.has(c));
     const columnList = common.map((c) => `"${c}"`).join(', ');
     db.exec(`INSERT INTO permits_migrated (${columnList}) SELECT ${columnList} FROM permits`);
+    db.exec("UPDATE permits_migrated SET permit_type = 'annual_inspection' WHERE permit_type = 'locational'");
     db.exec('DROP TABLE permits');
     db.exec('ALTER TABLE permits_migrated RENAME TO permits');
     db.exec('COMMIT');
@@ -480,6 +481,67 @@ function migratePermitsStatusCheck(db) {
   } finally {
     db.exec('PRAGMA foreign_keys = ON');
   }
+}
+
+const USERS_MIGRATION_SQL = `
+  CREATE TABLE users_migrated (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT UNIQUE,
+    username TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL,
+    full_name TEXT NOT NULL,
+    role TEXT NOT NULL CHECK(role IN ('admin', 'engineering_staff', 'municipal_engineer', 'viewer')),
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )
+`;
+
+function migrateRemoveCashierRole(db) {
+  const flag = 'migration_remove_cashier_v1';
+  if (db.prepare('SELECT value FROM settings WHERE key = ?').get(flag)) return false;
+
+  // Migrate locational fee setting to annual_inspection if present
+  const oldFee = db.prepare("SELECT value FROM settings WHERE key = 'permit_fee_locational'").get();
+  if (oldFee) {
+    db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('permit_fee_annual_inspection', ?)").run(oldFee.value);
+    db.prepare("DELETE FROM settings WHERE key = 'permit_fee_locational'").run();
+  }
+
+  // Grant engineering_staff access to payments
+  db.prepare("UPDATE role_permissions SET engineering_staff = 1 WHERE module = 'payments'").run();
+
+  // Remove demo cashier account and convert any other cashier accounts to engineering_staff
+  if (tableExists(db, 'users')) {
+    db.prepare("DELETE FROM users WHERE username = 'cashier' AND role = 'cashier'").run();
+    db.prepare("UPDATE users SET role = 'engineering_staff' WHERE role = 'cashier'").run();
+
+    const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'").get();
+    if (row && row.sql && row.sql.includes("'cashier'")) {
+      db.exec('PRAGMA foreign_keys = OFF');
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        db.exec('DROP TABLE IF EXISTS users_migrated');
+        db.exec(USERS_MIGRATION_SQL);
+        const oldColumns = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+        const newColumns = new Set(db.prepare('PRAGMA table_info(users_migrated)').all().map((c) => c.name));
+        const common = oldColumns.filter((c) => newColumns.has(c));
+        const columnList = common.map((c) => `"${c}"`).join(', ');
+        db.exec(`INSERT INTO users_migrated (${columnList}) SELECT ${columnList} FROM users`);
+        db.exec('DROP TABLE users');
+        db.exec('ALTER TABLE users_migrated RENAME TO users');
+        db.exec('COMMIT');
+      } catch (err) {
+        try { db.exec('ROLLBACK'); } catch { /* ignore */ }
+        throw err;
+      } finally {
+        db.exec('PRAGMA foreign_keys = ON');
+      }
+    }
+  }
+
+  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(flag, new Date().toISOString());
+  return true;
 }
 
 /**
@@ -533,11 +595,11 @@ function ensureColumns(db) {
 function seedRolePermissions(db) {
   const insert = db.prepare(`
     INSERT OR IGNORE INTO role_permissions
-      (module, admin, engineering_staff, cashier, municipal_engineer, viewer)
-    VALUES (?, ?, ?, ?, ?, ?)
+      (module, admin, engineering_staff, municipal_engineer, viewer)
+    VALUES (?, ?, ?, ?, ?)
   `);
   for (const m of ROLE_MODULES) {
-    insert.run(m.module, m.admin, m.engineering_staff, m.cashier, m.municipal_engineer, m.viewer);
+    insert.run(m.module, m.admin, m.engineering_staff, m.municipal_engineer, m.viewer);
   }
 }
 
@@ -593,6 +655,7 @@ function ensureDatabase(db) {
   seedRolePermissions(db);
   seedSettings(db);
   const portalPermissionsMigrated = migrateClientPortalPermissions(db);
+  const cashierRemoved = migrateRemoveCashierRole(db);
   const officeCreated = seedOfficeInfo(db);
   const usersCreated = seedUsers(db);
 
@@ -603,6 +666,7 @@ function ensureDatabase(db) {
     columnsAdded,
     permitsMigrated,
     portalPermissionsMigrated,
+    cashierRemoved,
     indexErrors,
     officeCreated,
     usersCreated,

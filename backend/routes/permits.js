@@ -5,28 +5,14 @@ const { checkPermission, requireRole, logAudit, getClientIp } = require('../midd
 const {
   ensureClientForUser, canViewPermit, notifyClient, notifyRole,
 } = require('../middleware/access');
+const {
+  PERMIT_TYPES, PERMIT_PREFIXES, ELECTRICAL_SUBTYPES, getRequirementsForPermit,
+} = require('../constants/permits');
 
 const router = express.Router();
 
-const DEFAULT_REQUIREMENTS = {
-  building: [
-    'Certified True Copy of Title',
-    'Tax Declaration',
-    'Building Plans (Signed & Sealed)',
-    'Bill of Materials',
-    'Barangay Clearance',
-    'Occupancy Permit Application',
-  ],
-  electrical: ['Electrical Plans', 'Load Computation', 'Tax Declaration', 'Barangay Clearance'],
-  occupancy: ['Building Permit', 'Certificate of Completion', 'Fire Safety Certificate', 'Tax Declaration'],
-  locational: ['Lot Plan', 'Tax Declaration', 'Barangay Clearance', 'Zoning Clearance'],
-  certificate: ['Application Form', 'Valid ID', 'Tax Declaration'],
-};
-
-const PERMIT_TYPES = ['building', 'electrical', 'occupancy', 'locational', 'certificate'];
-
 function generateAppNo(type) {
-  const prefix = { building: 'BP', electrical: 'EP', occupancy: 'OP', locational: 'LP', certificate: 'CP' }[type] || 'AP';
+  const prefix = PERMIT_PREFIXES[type] || 'AP';
   const year = new Date().getFullYear();
   let sequence = db.prepare('SELECT COUNT(*) AS c FROM permits WHERE permit_type = ?').get(type).c + 1;
   let applicationNo = `${prefix}-${year}-${String(sequence).padStart(4, '0')}`;
@@ -147,7 +133,7 @@ router.get('/:id', authenticate, checkPermission('permits'), (req, res) => {
 
 router.post('/', authenticate, checkPermission('permits'), (req, res) => {
   const {
-    permit_type, client_id, application_date, project_location, nature_of_construction,
+    permit_type, electrical_subtype, client_id, application_date, project_location, nature_of_construction,
     building_type, total_floor_area, num_storeys, assigned_staff_id, notes,
   } = req.body;
 
@@ -170,15 +156,18 @@ router.post('/', authenticate, checkPermission('permits'), (req, res) => {
   const client = db.prepare('SELECT id FROM clients WHERE id = ?').get(resolvedClientId);
   if (!client) return res.status(400).json({ error: 'Client not found' });
 
+  const resolvedSubtype = permit_type === 'electrical'
+    ? (ELECTRICAL_SUBTYPES.includes(electrical_subtype) ? electrical_subtype : 'electrification')
+    : null;
   const application_no = generateAppNo(permit_type);
   const total_fee = getFee(permit_type);
 
   const result = db.prepare(`
-    INSERT INTO permits (application_no, permit_type, client_id, application_date, project_location,
+    INSERT INTO permits (application_no, permit_type, electrical_subtype, client_id, application_date, project_location,
       nature_of_construction, building_type, total_floor_area, num_storeys, assigned_staff_id, total_fee, notes)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
-    application_no, permit_type, resolvedClientId,
+    application_no, permit_type, resolvedSubtype, resolvedClientId,
     application_date || new Date().toISOString().split('T')[0],
     project_location || '', nature_of_construction || '', building_type || '',
     Number(total_floor_area) || 0, Number(num_storeys) || 1,
@@ -187,7 +176,7 @@ router.post('/', authenticate, checkPermission('permits'), (req, res) => {
 
   const permitId = Number(result.lastInsertRowid);
   const insertReq = db.prepare('INSERT INTO permit_requirements (permit_id, requirement_name) VALUES (?, ?)');
-  for (const requirement of DEFAULT_REQUIREMENTS[permit_type] || []) {
+  for (const requirement of getRequirementsForPermit(permit_type, resolvedSubtype)) {
     insertReq.run(permitId, requirement);
   }
 
@@ -304,8 +293,8 @@ router.post('/:id/forward', authenticate, checkPermission('permits'),
   });
 
 /**
- * Municipal Engineer approval. Payment is NOT required at this stage: the
- * cashier only processes payment after the engineer has approved.
+ * Municipal Engineer approval. Payment is NOT required at this stage: payment
+ * is only processed after the engineer has approved.
  */
 router.post('/:id/approve', authenticate, checkPermission('permits'),
   requireRole('municipal_engineer'), (req, res) => {
@@ -340,10 +329,8 @@ router.post('/:id/approve', authenticate, checkPermission('permits'),
       `Approved permit ${permit.application_no}${remarks ? `: ${remarks}` : ''}`, getClientIp(req));
     notifyClient(permit.id, 'Application Approved',
       `Your application ${permit.application_no} was approved by the Municipal Engineer`, 'success');
-    notifyRole(['cashier'], 'Approved Application Ready for Payment',
-      `Application ${permit.application_no} is approved and ready for payment`, 'success', permit.id);
-    notifyRole(['engineering_staff', 'admin'], 'Application Approved',
-      `Application ${permit.application_no} was approved by the Municipal Engineer`, 'success', permit.id);
+    notifyRole(['engineering_staff', 'admin'], 'Approved Application Ready for Payment',
+      `Application ${permit.application_no} was approved by the Municipal Engineer and is ready for payment`, 'success', permit.id);
 
     res.json({ success: true, status: 'approved' });
   });
