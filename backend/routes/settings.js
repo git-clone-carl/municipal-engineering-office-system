@@ -5,6 +5,7 @@ const QRCode = require('qrcode');
 const db = require('../database/db');
 const { authenticate } = require('../middleware/auth');
 const { checkPermission, logAudit, getClientIp } = require('../middleware/rbac');
+const { sendTestEmail } = require('../utils/mailer');
 
 const router = express.Router();
 const dbPath = process.env.DB_PATH
@@ -90,16 +91,37 @@ router.post('/restore', authenticate, checkPermission('settings'), (req, res) =>
   res.json({ success: true, message: 'Database restored. Please restart the server.' });
 });
 
+router.post('/test-email', authenticate, checkPermission('settings'), async (req, res) => {
+  const { to } = req.body || {};
+  try {
+    const result = await sendTestEmail(to);
+    logAudit(req.user.id, req.user.username, req.user.role, `Sent test email to ${result.to}`, getClientIp(req));
+    res.json({ success: true, message: `Test email sent to ${result.to}.` });
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Failed to send test email' });
+  }
+});
+
 router.get('/permit/:id/preview', authenticate, checkPermission('permits'), async (req, res) => {
   const permit = db.prepare(`
-    SELECT p.*, c.full_name as client_name, c.address as client_address
+    SELECT p.*, c.full_name as client_name, c.address as client_address, c.email as client_email
     FROM permits p JOIN clients c ON p.client_id = c.id WHERE p.id = ?
   `).get(req.params.id);
   if (!permit) return res.status(404).json({ error: 'Permit not found' });
   const office = db.prepare('SELECT * FROM office_info WHERE id = 1').get();
+  const signatoryRows = db.prepare(
+    "SELECT key, value FROM settings WHERE key IN ('assessed_by_name', 'assessed_by_title', 'approved_by_name', 'approved_by_title')"
+  ).all();
+  const signatories = {
+    assessed_by_name: 'Engr. Jer Anthony F. Palo',
+    assessed_by_title: 'Engineer III',
+    approved_by_name: 'Engr. Aireen Mañago-Ubas',
+    approved_by_title: 'Building Official',
+    ...Object.fromEntries(signatoryRows.map((r) => [r.key, r.value])),
+  };
   const verifyUrl = `PERMIT:${permit.application_no}:${permit.id}`;
   const qrCode = await QRCode.toDataURL(verifyUrl);
-  res.json({ permit, office, qrCode });
+  res.json({ permit, office, signatories, qrCode });
 });
 
 module.exports = router;

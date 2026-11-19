@@ -1,18 +1,29 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { Icon, Modal, Pagination } from '../components/UI';
 
 const emptyForm = { full_name: '', contact_number: '', email: '', address: '' };
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function Clients() {
+  const [searchParams] = useSearchParams();
   const [clients, setClients] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(() => searchParams.get('search') || '');
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    const querySearch = searchParams.get('search');
+    if (querySearch !== null) {
+      setSearch(querySearch);
+      setPage(1);
+    }
+  }, [searchParams]);
 
   const load = () => {
     setLoading(true);
@@ -28,6 +39,15 @@ export default function Clients() {
   const openView = (c) => { setForm(c); setModal('view'); };
 
   const handleSave = async () => {
+    setError('');
+    if (!String(form.full_name || '').trim()) {
+      setError('Full Name is required.');
+      return;
+    }
+    if (!EMAIL_REGEX.test(String(form.email || '').trim())) {
+      setError('A valid Email Address is required.');
+      return;
+    }
     try {
       if (modal === 'create') await api.createClient(form);
       else await api.updateClient(form.id, form);
@@ -111,8 +131,8 @@ export default function Clients() {
             <input className="form-control" value={form.contact_number} onChange={(e) => setForm({ ...form, contact_number: e.target.value })} />
           </div>
           <div className="form-group">
-            <label>Email</label>
-            <input className="form-control" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+            <label>Email Address *</label>
+            <input className="form-control" type="email" placeholder="client@example.com" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
           </div>
         </div>
         <div className="form-group">

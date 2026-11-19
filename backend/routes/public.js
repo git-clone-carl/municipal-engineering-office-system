@@ -9,6 +9,7 @@ const {
   PERMIT_TYPES, PERMIT_PREFIXES, ELECTRICAL_SUBTYPES,
   ELECTRICAL_REQUIREMENTS, DEFAULT_REQUIREMENTS, getRequirementsForPermit,
 } = require('../constants/permits');
+const { isValidEmail } = require('../utils/mailer');
 
 const router = express.Router();
 
@@ -85,11 +86,15 @@ router.post('/apply', uploadMultiplePdfs, (req, res) => {
 
   const cleanName = String(full_name || '').trim();
   const cleanContact = String(contact_number || '').trim();
+  const cleanEmail = String(email || '').trim();
   const cleanAddress = String(address || '').trim();
   const cleanLocation = String(project_location || '').trim();
 
   if (!cleanName || !cleanContact || !cleanAddress) {
     return fail(400, 'Full name, contact number, and address are required.');
+  }
+  if (!isValidEmail(cleanEmail)) {
+    return fail(400, 'A valid email address is required.');
   }
   if (!PERMIT_TYPES.includes(permit_type)) {
     return fail(400, 'Please select a valid permit type.');

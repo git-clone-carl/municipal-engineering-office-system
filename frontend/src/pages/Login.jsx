@@ -103,6 +103,10 @@ export default function Login() {
         setFormError('Please fill in your Full Name, Contact Number, and Address.');
         return;
       }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientForm.email.trim())) {
+        setFormError('Please enter a valid Email Address (used for permit approval/rejection notifications).');
+        return;
+      }
       if (!clientForm.project_location.trim()) {
         setFormError('Please enter the Project Location.');
         return;
@@ -309,13 +313,14 @@ export default function Login() {
                       />
                     </div>
                     <div className="form-group">
-                      <label>Email (Optional)</label>
+                      <label>Email Address *</label>
                       <input
                         className="form-control"
                         type="email"
                         placeholder="name@example.com"
                         value={clientForm.email}
                         onChange={(e) => setClientForm({ ...clientForm, email: e.target.value })}
+                        required
                       />
                     </div>
                   </div>
@@ -493,6 +498,7 @@ export default function Login() {
                   >
                     <div className="doc-field"><span className="label">Full Name</span><span>{clientForm.full_name}</span></div>
                     <div className="doc-field"><span className="label">Contact Number</span><span>{clientForm.contact_number}</span></div>
+                    <div className="doc-field"><span className="label">Email Address</span><span>{clientForm.email}</span></div>
                     <div className="doc-field"><span className="label">Address</span><span>{clientForm.address}</span></div>
                     <div className="doc-field">
                       <span className="label">Permit Type</span>

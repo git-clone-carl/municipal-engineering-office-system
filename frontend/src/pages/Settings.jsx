@@ -8,6 +8,9 @@ export default function Settings() {
   const [system, setSystem] = useState({});
   const [backupInfo, setBackupInfo] = useState({ backups: [], lastBackup: null });
   const [loading, setLoading] = useState(true);
+  const [testEmailTo, setTestEmailTo] = useState('');
+  const [testingEmail, setTestingEmail] = useState(false);
+  const [emailStatus, setEmailStatus] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -37,6 +40,24 @@ export default function Settings() {
     alert('System settings updated.');
   };
 
+  const handleSendTestEmail = async () => {
+    setEmailStatus(null);
+    if (!testEmailTo.trim()) {
+      setEmailStatus({ type: 'error', text: 'Please enter a recipient email address to test.' });
+      return;
+    }
+    setTestingEmail(true);
+    try {
+      await api.updateSystemSettings(system);
+      const res = await api.sendTestEmail(testEmailTo.trim());
+      setEmailStatus({ type: 'success', text: res.message || 'Test email sent.' });
+    } catch (err) {
+      setEmailStatus({ type: 'error', text: err.message || 'Failed to send test email.' });
+    } finally {
+      setTestingEmail(false);
+    }
+  };
+
   const backupNow = async () => {
     await api.createBackup();
     await load();
@@ -58,7 +79,8 @@ export default function Settings() {
 
       <div className="tabs">
         <button className={`tab ${tab === 'office' ? 'active' : ''}`} onClick={() => setTab('office')}>Office Info</button>
-        <button className={`tab ${tab === 'system' ? 'active' : ''}`} onClick={() => setTab('system')}>LAN Configuration</button>
+        <button className={`tab ${tab === 'system' ? 'active' : ''}`} onClick={() => setTab('system')}>LAN &amp; Fees</button>
+        <button className={`tab ${tab === 'email' ? 'active' : ''}`} onClick={() => setTab('email')}>Email (SMTP)</button>
         <button className={`tab ${tab === 'backup' ? 'active' : ''}`} onClick={() => setTab('backup')}>Backup / Restore</button>
       </div>
 
@@ -151,6 +173,137 @@ export default function Settings() {
                 <label>Certificate Fee</label>
                 <input className="form-control" value={system.permit_fee_certificate || ''} onChange={(e) => setSystem({ ...system, permit_fee_certificate: e.target.value })} />
               </div>
+            </div>
+            <hr style={{ margin: '18px 0', border: 'none', borderTop: '1px solid var(--border-color)' }} />
+            <h4 style={{ margin: '0 0 12px' }}>Printed Permit Signatories</h4>
+            <div className="form-row">
+              <div className="form-group">
+                <label>Assessed By (Name)</label>
+                <input className="form-control" value={system.assessed_by_name || 'Engr. Jer Anthony F. Palo'} onChange={(e) => setSystem({ ...system, assessed_by_name: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label>Assessed By (Title)</label>
+                <input className="form-control" value={system.assessed_by_title || 'Engineer III'} onChange={(e) => setSystem({ ...system, assessed_by_title: e.target.value })} />
+              </div>
+            </div>
+            <div className="form-row">
+              <div className="form-group">
+                <label>Approved By (Name)</label>
+                <input className="form-control" value={system.approved_by_name || 'Engr. Aireen Mañago-Ubas'} onChange={(e) => setSystem({ ...system, approved_by_name: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label>Approved By (Title)</label>
+                <input className="form-control" value={system.approved_by_title || 'Building Official'} onChange={(e) => setSystem({ ...system, approved_by_title: e.target.value })} />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab === 'email' && (
+        <div className="card">
+          <div className="card-header">
+            <h3>Email Notification Settings (Nodemailer / SMTP)</h3>
+            <button className="btn btn-primary" onClick={saveSystem}>Save SMTP Settings</button>
+          </div>
+          <div className="card-body">
+            <p className="page-subtitle" style={{ marginBottom: 16 }}>
+              Configure SMTP credentials so the system automatically emails clients when their permit application is approved or rejected.
+              For Gmail, use <code>smtp.gmail.com</code>, port <code>587</code>, and a Google App Password.
+            </p>
+            <div className="form-row">
+              <div className="form-group">
+                <label>SMTP Host</label>
+                <input
+                  className="form-control"
+                  placeholder="e.g. smtp.gmail.com"
+                  value={system.smtp_host || ''}
+                  onChange={(e) => setSystem({ ...system, smtp_host: e.target.value })}
+                />
+              </div>
+              <div className="form-group">
+                <label>SMTP Port</label>
+                <input
+                  className="form-control"
+                  placeholder="587 (TLS) or 465 (SSL)"
+                  value={system.smtp_port || '587'}
+                  onChange={(e) => setSystem({ ...system, smtp_port: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="form-row">
+              <div className="form-group">
+                <label>SMTP Username (Email)</label>
+                <input
+                  className="form-control"
+                  type="email"
+                  placeholder="office@gmail.com"
+                  value={system.smtp_user || ''}
+                  onChange={(e) => setSystem({ ...system, smtp_user: e.target.value })}
+                />
+              </div>
+              <div className="form-group">
+                <label>SMTP Password / App Password</label>
+                <input
+                  className="form-control"
+                  type="password"
+                  placeholder="App password"
+                  value={system.smtp_pass || ''}
+                  onChange={(e) => setSystem({ ...system, smtp_pass: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="form-row">
+              <div className="form-group">
+                <label>From Email (optional, defaults to SMTP Username)</label>
+                <input
+                  className="form-control"
+                  type="email"
+                  placeholder="engineering@gumaca.gov.ph"
+                  value={system.smtp_from || ''}
+                  onChange={(e) => setSystem({ ...system, smtp_from: e.target.value })}
+                />
+              </div>
+              <div className="form-group">
+                <label>Use SSL/TLS (Port 465)</label>
+                <select
+                  className="form-control"
+                  value={system.smtp_secure || 'false'}
+                  onChange={(e) => setSystem({ ...system, smtp_secure: e.target.value })}
+                >
+                  <option value="false">No (STARTTLS / Port 587)</option>
+                  <option value="true">Yes (SSL / Port 465)</option>
+                </select>
+              </div>
+            </div>
+
+            <hr style={{ margin: '18px 0', border: 'none', borderTop: '1px solid var(--border-color)' }} />
+            <h4 style={{ margin: '0 0 10px' }}>Send Test Email</h4>
+            {emailStatus && (
+              <div
+                className={emailStatus.type === 'error' ? 'login-error' : 'badge badge-active'}
+                style={{ display: 'block', marginBottom: 12, padding: '8px 12px' }}
+              >
+                {emailStatus.text}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', maxWidth: 480 }}>
+              <input
+                className="form-control"
+                type="email"
+                placeholder="recipient@example.com"
+                value={testEmailTo}
+                onChange={(e) => setTestEmailTo(e.target.value)}
+              />
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ whiteSpace: 'nowrap' }}
+                disabled={testingEmail}
+                onClick={handleSendTestEmail}
+              >
+                {testingEmail ? 'Sending...' : 'Send Test'}
+              </button>
             </div>
           </div>
         </div>

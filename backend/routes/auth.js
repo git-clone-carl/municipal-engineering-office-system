@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const db = require('../database/db');
 const { signToken, authenticate } = require('../middleware/auth');
 const { logAudit, getClientIp } = require('../middleware/rbac');
+const { isValidEmail } = require('../utils/mailer');
 
 const router = express.Router();
 
@@ -42,6 +43,9 @@ router.post('/register', (req, res) => {
 
   if (!username || !password || !full_name) {
     return res.status(400).json({ error: 'Full name, username, and password are required' });
+  }
+  if (!isValidEmail(email)) {
+    return res.status(400).json({ error: 'A valid email address is required' });
   }
   if (String(username).trim().length < 3) {
     return res.status(400).json({ error: 'Username must be at least 3 characters long' });

@@ -3,6 +3,7 @@ const db = require('../database/db');
 const { authenticate } = require('../middleware/auth');
 const { checkPermission, logAudit, getClientIp } = require('../middleware/rbac');
 const { ensureClientForUser } = require('../middleware/access');
+const { isValidEmail } = require('../utils/mailer');
 
 const router = express.Router();
 
@@ -48,12 +49,18 @@ router.get('/:id', authenticate, checkPermission('clients'), (req, res) => {
 
 router.post('/', authenticate, checkPermission('clients'), (req, res) => {
   const { full_name, contact_number, email, address } = req.body;
-  if (!full_name) return res.status(400).json({ error: 'Client name is required' });
+  if (!full_name || !String(full_name).trim()) {
+    return res.status(400).json({ error: 'Client name is required' });
+  }
+  const cleanEmail = String(email || '').trim();
+  if (!isValidEmail(cleanEmail)) {
+    return res.status(400).json({ error: 'A valid email address is required' });
+  }
   const client_id = generateClientId();
   const result = db.prepare(`
     INSERT INTO clients (client_id, full_name, contact_number, email, address)
     VALUES (?, ?, ?, ?, ?)
-  `).run(client_id, full_name, contact_number || '', email || '', address || '');
+  `).run(client_id, String(full_name).trim(), contact_number || '', cleanEmail, address || '');
   logAudit(req.user.id, req.user.username, req.user.role, `Created client ${full_name}`, getClientIp(req));
   res.status(201).json({ id: result.lastInsertRowid, client_id });
 });
@@ -62,10 +69,14 @@ router.put('/:id', authenticate, checkPermission('clients'), (req, res) => {
   const { full_name, contact_number, email, address } = req.body;
   const client = db.prepare('SELECT * FROM clients WHERE id = ?').get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
+  const nextEmail = String(email !== undefined ? email : client.email || '').trim();
+  if (!isValidEmail(nextEmail)) {
+    return res.status(400).json({ error: 'A valid email address is required' });
+  }
   db.prepare(`
     UPDATE clients SET full_name=?, contact_number=?, email=?, address=?, updated_at=CURRENT_TIMESTAMP
     WHERE id=?
-  `).run(full_name || client.full_name, contact_number ?? client.contact_number, email ?? client.email, address ?? client.address, req.params.id);
+  `).run(full_name || client.full_name, contact_number ?? client.contact_number, nextEmail, address ?? client.address, req.params.id);
   logAudit(req.user.id, req.user.username, req.user.role, `Updated client ${client.full_name}`, getClientIp(req));
   res.json({ success: true });
 });

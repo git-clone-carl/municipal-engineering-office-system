@@ -101,5 +101,6 @@ export const api = {
   getBackupInfo: () => request('/settings/backup/info'),
   createBackup: () => request('/settings/backup', { method: 'POST' }),
   restoreBackup: (filename) => request('/settings/restore', { method: 'POST', body: JSON.stringify({ filename }) }),
+  sendTestEmail: (to) => request('/settings/test-email', { method: 'POST', body: JSON.stringify({ to }) }),
   getPermitPreview: (id) => request(`/settings/permit/${id}/preview`),
 };

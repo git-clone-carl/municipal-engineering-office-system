@@ -355,6 +355,16 @@ function defaultSettings() {
     permit_fee_occupancy: '1500',
     permit_fee_annual_inspection: '1000',
     permit_fee_certificate: '500',
+    smtp_host: '',
+    smtp_port: '587',
+    smtp_secure: 'false',
+    smtp_user: '',
+    smtp_pass: '',
+    smtp_from: '',
+    assessed_by_name: 'Engr. Jer Anthony F. Palo',
+    assessed_by_title: 'Engineer III',
+    approved_by_name: 'Engr. Aireen Mañago-Ubas',
+    approved_by_title: 'Building Official',
   };
 }
 

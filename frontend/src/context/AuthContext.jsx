@@ -7,6 +7,7 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [permissions, setPermissions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [showStaffGuide, setShowStaffGuide] = useState(false);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -31,6 +32,10 @@ export function AuthProvider({ children }) {
     setUser(data.user);
     const permData = await api.getPermissions();
     setPermissions(permData.modules);
+    if (data.user?.role === 'engineering_staff') {
+      const hidden = localStorage.getItem(`hide_staff_guide_${data.user.id}`) === 'true';
+      if (!hidden) setShowStaffGuide(true);
+    }
     return data;
   };
 
@@ -47,12 +52,27 @@ export function AuthProvider({ children }) {
     localStorage.removeItem('token');
     setUser(null);
     setPermissions([]);
+    setShowStaffGuide(false);
   };
+
+  const dismissStaffGuide = () => setShowStaffGuide(false);
 
   const hasAccess = (module) => permissions.includes(module);
 
   return (
-    <AuthContext.Provider value={{ user, permissions, loading, login, register, logout, hasAccess }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        permissions,
+        loading,
+        showStaffGuide,
+        dismissStaffGuide,
+        login,
+        register,
+        logout,
+        hasAccess,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

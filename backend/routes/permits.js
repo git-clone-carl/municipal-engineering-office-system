@@ -8,6 +8,7 @@ const {
 const {
   PERMIT_TYPES, PERMIT_PREFIXES, ELECTRICAL_SUBTYPES, getRequirementsForPermit,
 } = require('../constants/permits');
+const { sendPermitDecisionEmail, isValidEmail } = require('../utils/mailer');
 
 const router = express.Router();
 
@@ -133,7 +134,7 @@ router.get('/:id', authenticate, checkPermission('permits'), (req, res) => {
 
 router.post('/', authenticate, checkPermission('permits'), (req, res) => {
   const {
-    permit_type, electrical_subtype, client_id, application_date, project_location, nature_of_construction,
+    permit_type, electrical_subtype, client_id, client_email, application_date, project_location, nature_of_construction,
     building_type, total_floor_area, num_storeys, assigned_staff_id, notes,
   } = req.body;
 
@@ -153,8 +154,17 @@ router.post('/', authenticate, checkPermission('permits'), (req, res) => {
   if (!resolvedClientId) {
     return res.status(400).json({ error: 'Permit type and client are required' });
   }
-  const client = db.prepare('SELECT id FROM clients WHERE id = ?').get(resolvedClientId);
+  const client = db.prepare('SELECT id, email FROM clients WHERE id = ?').get(resolvedClientId);
   if (!client) return res.status(400).json({ error: 'Client not found' });
+
+  const cleanEmail = String(client_email || client.email || '').trim();
+  if (!isValidEmail(cleanEmail)) {
+    return res.status(400).json({ error: 'A valid client email address is required' });
+  }
+  if (client_email && cleanEmail !== String(client.email || '').trim()) {
+    db.prepare('UPDATE clients SET email = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run(cleanEmail, client.id);
+  }
 
   const resolvedSubtype = permit_type === 'electrical'
     ? (ELECTRICAL_SUBTYPES.includes(electrical_subtype) ? electrical_subtype : 'electrification')
@@ -297,7 +307,7 @@ router.post('/:id/forward', authenticate, checkPermission('permits'),
  * is only processed after the engineer has approved.
  */
 router.post('/:id/approve', authenticate, checkPermission('permits'),
-  requireRole('municipal_engineer'), (req, res) => {
+  requireRole('municipal_engineer'), async (req, res) => {
     const permit = loadPermit(req, res);
     if (!permit) return;
     if (permit.status !== 'for_approval') {
@@ -332,12 +342,32 @@ router.post('/:id/approve', authenticate, checkPermission('permits'),
     notifyRole(['engineering_staff', 'admin'], 'Approved Application Ready for Payment',
       `Application ${permit.application_no} was approved by the Municipal Engineer and is ready for payment`, 'success', permit.id);
 
-    res.json({ success: true, status: 'approved' });
+    const client = db.prepare('SELECT full_name, email FROM clients WHERE id = ?').get(permit.client_id);
+    const office = db.prepare('SELECT * FROM office_info WHERE id = 1').get();
+    const emailResult = await sendPermitDecisionEmail({
+      to: client?.email,
+      clientName: client?.full_name,
+      applicationNo: permit.application_no,
+      permitType: permit.permit_type,
+      decision: 'approved',
+      remarks,
+      totalFee: permit.total_fee,
+      projectLocation: permit.project_location,
+      office,
+    });
+
+    res.json({
+      success: true,
+      status: 'approved',
+      email_sent: emailResult.sent,
+      email_to: emailResult.to || null,
+      email_error: emailResult.error || null,
+    });
   });
 
 /** Municipal Engineer rejection. Remarks are mandatory. */
 router.post('/:id/reject', authenticate, checkPermission('permits'),
-  requireRole('municipal_engineer'), (req, res) => {
+  requireRole('municipal_engineer'), async (req, res) => {
     const permit = loadPermit(req, res);
     if (!permit) return;
     if (permit.status !== 'for_approval') {
@@ -374,7 +404,27 @@ router.post('/:id/reject', authenticate, checkPermission('permits'),
     notifyRole(['engineering_staff', 'admin'], 'Application Rejected',
       `Application ${permit.application_no} was rejected. Reason: ${remarks}`, 'danger', permit.id);
 
-    res.json({ success: true, status: 'rejected' });
+    const client = db.prepare('SELECT full_name, email FROM clients WHERE id = ?').get(permit.client_id);
+    const office = db.prepare('SELECT * FROM office_info WHERE id = 1').get();
+    const emailResult = await sendPermitDecisionEmail({
+      to: client?.email,
+      clientName: client?.full_name,
+      applicationNo: permit.application_no,
+      permitType: permit.permit_type,
+      decision: 'rejected',
+      remarks,
+      totalFee: permit.total_fee,
+      projectLocation: permit.project_location,
+      office,
+    });
+
+    res.json({
+      success: true,
+      status: 'rejected',
+      email_sent: emailResult.sent,
+      email_to: emailResult.to || null,
+      email_error: emailResult.error || null,
+    });
   });
 
 /** Staff: release a fully paid permit. */

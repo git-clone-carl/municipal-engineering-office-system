@@ -5,11 +5,13 @@ import { api } from '../api/client';
 import {
   Icon, Modal, Pagination, PERMIT_TYPES, STATUS_LABELS, formatCurrency, formatDate,
   formatDateTime, formatFileSize, CustomSelect, CustomDatePicker,
-  printDocumentHtml, buildFormalHeaderHtml, escapeHtml,
 } from '../components/UI';
 import { ELECTRICAL_SUBTYPES, getRequirementsForPermit } from '../constants/permits';
 import DocumentsPanel from '../components/DocumentsPanel';
 import Receipt from '../components/Receipt';
+import PermitAssessmentSheet from '../components/PermitAssessmentSheet';
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const STEPS = ['Application Details', 'Requirements', 'Payment', 'Review'];
 const STATUS_FLOW = ['submitted', 'for_review', 'for_approval', 'approved', 'paid', 'released'];
@@ -18,6 +20,7 @@ const emptyForm = {
   permit_type: 'building',
   electrical_subtype: 'electrification',
   client_id: '',
+  client_email: '',
   application_date: new Date().toISOString().split('T')[0],
   project_location: '',
   nature_of_construction: '',
@@ -78,6 +81,11 @@ export default function Permits() {
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
+    const querySearch = searchParams.get('search');
+    if (querySearch !== null) {
+      setSearch(querySearch);
+      setPage(1);
+    }
     const openId = searchParams.get('open');
     if (!openId) return;
     setSearchParams({}, { replace: true });
@@ -127,7 +135,11 @@ export default function Permits() {
   };
 
   const openCreate = () => {
-    setForm({ ...emptyForm, client_id: myClient?.id ? String(myClient.id) : '' });
+    setForm({
+      ...emptyForm,
+      client_id: myClient?.id ? String(myClient.id) : '',
+      client_email: myClient?.email || '',
+    });
     setRequirementFiles({});
     setStep(0);
     setError('');
@@ -176,6 +188,10 @@ export default function Permits() {
         setError(isClient
           ? 'Your client profile is still loading. Please try again.'
           : 'Please select a client before proceeding.');
+        return;
+      }
+      if (!EMAIL_REGEX.test(String(form.client_email || '').trim())) {
+        setError('Please enter a valid client email address before proceeding.');
         return;
       }
       if (!String(form.project_location || '').trim()) {
@@ -287,17 +303,21 @@ export default function Permits() {
     setActionLoading(true);
     setDecisionError('');
     try {
-      if (decision === 'approve') {
-        await api.approvePermit(selectedPermit.id, decisionRemarks.trim());
-      } else {
-        await api.rejectPermit(selectedPermit.id, decisionRemarks.trim());
-      }
+      const result = decision === 'approve'
+        ? await api.approvePermit(selectedPermit.id, decisionRemarks.trim())
+        : await api.rejectPermit(selectedPermit.id, decisionRemarks.trim());
       setDecision(null);
       await load(true);
       await refreshSelected();
-      setViewSuccess(decision === 'approve'
+      const baseMsg = decision === 'approve'
         ? 'Application approved. Payment can now be processed.'
-        : 'Application rejected. The client has been notified.');
+        : 'Application rejected.';
+      const emailMsg = result?.email_sent
+        ? ` Email notification sent to ${result.email_to}.`
+        : result?.email_error
+          ? ` (Email not sent: ${result.email_error})`
+          : '';
+      setViewSuccess(`${baseMsg}${emailMsg}`);
     } catch (err) {
       setDecisionError(err.message);
     } finally {
@@ -469,20 +489,49 @@ export default function Permits() {
               </div>
             )}
             {isClient ? (
-              <div className="form-group">
-                <label>Applicant</label>
-                <input className="form-control" value={myClient ? `${myClient.client_id} - ${myClient.full_name}` : 'Loading your profile...'} readOnly />
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Applicant</label>
+                  <input className="form-control" value={myClient ? `${myClient.client_id} - ${myClient.full_name}` : 'Loading your profile...'} readOnly />
+                </div>
+                <div className="form-group">
+                  <label>Email Address *</label>
+                  <input
+                    className="form-control"
+                    type="email"
+                    placeholder="client@example.com"
+                    value={form.client_email}
+                    onChange={(e) => setForm({ ...form, client_email: e.target.value })}
+                    required
+                  />
+                </div>
               </div>
             ) : (
-              <div className="form-group">
-                <label>Client</label>
-                <CustomSelect
-                  value={form.client_id}
-                  onChange={(val) => setForm({ ...form, client_id: val })}
-                  placeholder="Select client"
-                  options={clients.map((c) => ({ value: c.id, label: `${c.client_id} - ${c.full_name}` }))}
-                  style={{ width: '100%' }}
-                />
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Client *</label>
+                  <CustomSelect
+                    value={form.client_id}
+                    onChange={(val) => {
+                      const matched = clients.find((c) => String(c.id) === String(val));
+                      setForm({ ...form, client_id: val, client_email: matched?.email || '' });
+                    }}
+                    placeholder="Select client"
+                    options={clients.map((c) => ({ value: c.id, label: `${c.client_id} - ${c.full_name}` }))}
+                    style={{ width: '100%' }}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Client Email Address *</label>
+                  <input
+                    className="form-control"
+                    type="email"
+                    placeholder="client@example.com"
+                    value={form.client_email}
+                    onChange={(e) => setForm({ ...form, client_email: e.target.value })}
+                    required
+                  />
+                </div>
               </div>
             )}
             <div className="form-group">
@@ -655,6 +704,7 @@ export default function Permits() {
                   <div className="card-body">
                     <div className="doc-field"><span className="label">Application No.</span><span>{selectedPermit.application_no}</span></div>
                     <div className="doc-field"><span className="label">Client</span><span>{selectedPermit.client_name}</span></div>
+                    <div className="doc-field"><span className="label">Client Email</span><span>{selectedPermit.client_email || '-'}</span></div>
                     <div className="doc-field"><span className="label">Permit Type</span><span>{PERMIT_TYPES[selectedPermit.permit_type]}</span></div>
                     <div className="doc-field"><span className="label">Application Date</span><span>{formatDate(selectedPermit.application_date)}</span></div>
                     {selectedPermit.permit_type === 'electrical' && selectedPermit.electrical_subtype && (
@@ -833,74 +883,7 @@ export default function Permits() {
       </Modal>
 
       <Modal open={modal === 'preview'} onClose={() => setModal(null)} title="Printable Permit Preview" large>
-        {previewData && (
-          <>
-            <div className="receipt-actions no-print">
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => {
-                  const permitTitle = (PERMIT_TYPES[previewData.permit.permit_type] || 'PERMIT').toUpperCase();
-                  const headerHtml = buildFormalHeaderHtml({
-                    office: previewData.office,
-                    title: permitTitle,
-                  });
-                  const bodyHtml = `
-                    <div class="receipt-box">
-                      ${headerHtml}
-                      <table class="kv-table">
-                        <tr><td class="kv-key">Application No.</td><td class="kv-val"><strong>${escapeHtml(previewData.permit.application_no)}</strong></td></tr>
-                        <tr><td class="kv-key">Client Name</td><td class="kv-val">${escapeHtml(previewData.permit.client_name)}</td></tr>
-                        <tr><td class="kv-key">Address</td><td class="kv-val">${escapeHtml(previewData.permit.client_address || '-')}</td></tr>
-                        <tr><td class="kv-key">Project Location</td><td class="kv-val">${escapeHtml(previewData.permit.project_location || '-')}</td></tr>
-                        <tr><td class="kv-key">Nature of Construction</td><td class="kv-val">${escapeHtml(previewData.permit.nature_of_construction || '-')}</td></tr>
-                        <tr><td class="kv-key">Estimated Floor Area</td><td class="kv-val">${escapeHtml(previewData.permit.total_floor_area ? `${previewData.permit.total_floor_area} sq` : '-')}</td></tr>
-                        <tr><td class="kv-key">Permit Type</td><td class="kv-val">${escapeHtml(PERMIT_TYPES[previewData.permit.permit_type] || previewData.permit.permit_type)}</td></tr>
-                        <tr><td class="kv-key">Issued Date</td><td class="kv-val">${escapeHtml(formatDate(previewData.permit.issued_date))}</td></tr>
-                      </table>
-                      <div class="qr-wrap"><img src="${previewData.qrCode}" alt="QR Code" /></div>
-                      <div class="signatory-grid">
-                        <div class="sig-block" style="max-width: 260px; margin-left: auto;">
-                          <div class="sig-line">${escapeHtml(previewData.office.municipal_engineer || 'Municipal Engineer')}</div>
-                          <div class="sig-role">Municipal Engineer</div>
-                        </div>
-                      </div>
-                    </div>
-                  `;
-                  printDocumentHtml({
-                    title: `${permitTitle} - ${previewData.permit.application_no}`,
-                    bodyHtml,
-                  });
-                }}
-              >
-                <Icon name="print" size={16} /> Print Permit
-              </button>
-            </div>
-            <div className="permit-document">
-              <div className="doc-header">
-                <div style={{ background: 'var(--gumaca-maroon)', padding: '12px 18px', borderRadius: 10, marginBottom: 12, display: 'flex', justifyContent: 'center' }}>
-                  <img
-                    src="/gumacalogo.png"
-                    alt="Municipality of Gumaca"
-                    style={{ display: 'block', maxHeight: 62, width: 'auto', objectFit: 'contain' }}
-                  />
-                </div>
-                <h2>{previewData.office.office_name}</h2>
-                <div style={{ marginTop: 8, fontWeight: 700 }}>{(PERMIT_TYPES[previewData.permit.permit_type] || 'BUILDING PERMIT').toUpperCase()}</div>
-              </div>
-              <div className="doc-field"><span className="label">Application No.</span><span>{previewData.permit.application_no}</span></div>
-              <div className="doc-field"><span className="label">Client Name</span><span>{previewData.permit.client_name}</span></div>
-              <div className="doc-field"><span className="label">Address</span><span>{previewData.permit.client_address}</span></div>
-              <div className="doc-field"><span className="label">Project Location</span><span>{previewData.permit.project_location}</span></div>
-              <div className="doc-field"><span className="label">Nature of Construction</span><span>{previewData.permit.nature_of_construction}</span></div>
-              <div className="doc-field"><span className="label">Estimated Floor Area</span><span>{previewData.permit.total_floor_area ? `${previewData.permit.total_floor_area} sq` : '-'}</span></div>
-              <div className="doc-field"><span className="label">Permit Type</span><span>{PERMIT_TYPES[previewData.permit.permit_type]}</span></div>
-              <div className="doc-field"><span className="label">Issued Date</span><span>{formatDate(previewData.permit.issued_date)}</span></div>
-              <div className="qr"><img src={previewData.qrCode} alt="QR Code" style={{ width: 130, height: 130 }} /></div>
-              <div className="signature">{previewData.office.municipal_engineer}<br />Municipal Engineer</div>
-            </div>
-          </>
-        )}
+        {previewData && <PermitAssessmentSheet data={previewData} />}
       </Modal>
 
       <Modal open={!!receiptData} onClose={() => setReceiptData(null)} title="Official Receipt" large>
