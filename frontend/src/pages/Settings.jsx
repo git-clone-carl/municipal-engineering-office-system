@@ -208,7 +208,7 @@ export default function Settings() {
           </div>
           <div className="card-body">
             <p className="page-subtitle" style={{ marginBottom: 16 }}>
-              Configure SMTP credentials so the system automatically emails clients when their permit application is approved or rejected.
+              Configure SMTP credentials so the system automatically emails clients when their permit application is pending (submitted, under review, or for approval), approved, disapproved/rejected, or released.
               For Gmail, use <code>smtp.gmail.com</code>, port <code>587</code>, and a Google App Password.
             </p>
             <div className="form-row">

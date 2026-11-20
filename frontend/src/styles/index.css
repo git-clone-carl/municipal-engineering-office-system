@@ -2053,11 +2053,25 @@ tbody tr:nth-child(8) { animation-delay: 0.21s; }
 /* ===== Printable Permit Document Preview ===== */
 .permit-document {
   background: var(--white);
-  border: var(--border);
-  border-radius: var(--radius-card);
-  padding: 32px;
-  max-width: 640px;
+  border: 1px solid #111111;
+  border-radius: 0;
+  padding: 24px 28px;
+  max-width: 660px;
   margin: 0 auto;
+}
+
+.permit-document table {
+  width: auto;
+  font-size: inherit;
+}
+
+.permit-document tbody td {
+  color: inherit;
+  border-bottom: none;
+}
+
+.permit-document tbody tr:hover {
+  background-color: transparent;
 }
 
 .permit-document .doc-header {

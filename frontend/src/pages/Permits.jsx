@@ -61,6 +61,7 @@ export default function Permits() {
   const [actionLoading, setActionLoading] = useState(false);
   const [viewError, setViewError] = useState('');
   const [viewSuccess, setViewSuccess] = useState('');
+  const [pageSuccess, setPageSuccess] = useState('');
   const [error, setError] = useState('');
   const [requirementFiles, setRequirementFiles] = useState({});
   const [submitting, setSubmitting] = useState(false);
@@ -143,6 +144,7 @@ export default function Permits() {
     setRequirementFiles({});
     setStep(0);
     setError('');
+    setPageSuccess('');
     setSelectedPermit(null);
     setModal('create');
   };
@@ -256,6 +258,12 @@ export default function Permits() {
 
       setModal(null);
       setViewSuccess('');
+      const emailMsg = created?.email_sent
+        ? ` Email notification sent to ${created.email_to}.`
+        : created?.email_error
+          ? ` (Email not sent: ${created.email_error})`
+          : '';
+      setPageSuccess(`Application ${created.application_no} submitted.${emailMsg}`);
       await load(true);
     } catch (err) {
       setError(err.message);
@@ -269,10 +277,15 @@ export default function Permits() {
     setViewError('');
     setViewSuccess('');
     try {
-      await action();
+      const result = await action();
       await load(true);
       await refreshSelected();
-      setViewSuccess(successMessage);
+      const emailMsg = result?.email_sent
+        ? ` Email notification sent to ${result.email_to}.`
+        : result?.email_error
+          ? ` (Email not sent: ${result.email_error})`
+          : '';
+      setViewSuccess(`${successMessage}${emailMsg}`);
     } catch (err) {
       setViewError(err.message);
     } finally {
@@ -345,6 +358,7 @@ export default function Permits() {
       </p>
 
       {error && <div className="login-error">{error}</div>}
+      {pageSuccess && <div className="badge badge-active" style={{ display: 'inline-block', marginBottom: 12 }}>{pageSuccess}</div>}
 
       <div className="toolbar">
         <div className="toolbar-left">

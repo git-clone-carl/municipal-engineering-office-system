@@ -241,6 +241,9 @@ export default function Login() {
               <h2 style={{ margin: '0 0 6px', fontSize: 20 }}>Application Submitted!</h2>
               <p className="page-subtitle" style={{ marginBottom: 18 }}>
                 Your permit application and required PDF documents have been received by the Municipal Engineering Office.
+                {submittedResult.email_sent && submittedResult.email_to
+                  ? ` A confirmation email has been sent to ${submittedResult.email_to}.`
+                  : ''}
               </p>
 
               <div
