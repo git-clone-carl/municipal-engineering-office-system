@@ -3,6 +3,7 @@ const path = require('path');
 const dotenv = require('dotenv');
 const nodemailer = require('nodemailer');
 const db = require('../database/db');
+const { validateEmailFormat, verifyEmailDeliverable } = require('./validation');
 
 const ENV_PATHS = [
   path.join(__dirname, '..', '.env'),
@@ -55,10 +56,8 @@ const PERMIT_LABELS = {
   certificate: 'Certificate',
 };
 
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 function isValidEmail(email) {
-  return EMAIL_REGEX.test(String(email || '').trim());
+  return validateEmailFormat(email).valid;
 }
 
 function getSetting(key) {
@@ -415,6 +414,97 @@ async function sendTestEmail(to) {
   return { sent: true, to: recipient, messageId: info.messageId || null };
 }
 
+const verificationCodes = new Map();
+
+function pruneExpiredCodes() {
+  const now = Date.now();
+  for (const [key, entry] of verificationCodes.entries()) {
+    if (entry.expiresAt < now) {
+      verificationCodes.delete(key);
+    }
+  }
+}
+
+async function sendEmailVerificationCode(email) {
+  const check = await verifyEmailDeliverable(email);
+  if (!check.valid) {
+    throw new Error(check.error || 'Invalid email address.');
+  }
+
+  const mailCtx = createTransporter();
+  if (!mailCtx) {
+    throw new Error('SMTP is not configured on the server. Email format and domain were checked, but a verification email cannot be sent yet.');
+  }
+
+  pruneExpiredCodes();
+  const key = check.email;
+  const existing = verificationCodes.get(key);
+  if (existing && existing.lastSentAt && Date.now() - existing.lastSentAt < 30 * 1000) {
+    throw new Error('Please wait 30 seconds before requesting another verification code.');
+  }
+
+  const code = String(Math.floor(100000 + Math.random() * 900000));
+  const logoAttachment = getLogoAttachment();
+  const logoHtml = logoAttachment
+    ? `<div style="background: #7f1d1d; padding: 14px 20px; text-align: center; border-radius: 6px; margin-bottom: 14px;"><img src="cid:${LOGO_CID}" alt="Municipality of Gumaca" style="display: block; margin: 0 auto; max-height: 52px; width: auto; max-width: 100%; border: 0;" /></div>`
+    : '';
+
+  await mailCtx.transporter.sendMail({
+    from: `"Municipal Engineering Office" <${mailCtx.from}>`,
+    to: key,
+    subject: 'Email Verification Code - Municipal Engineering Office',
+    text: `Your Municipal Engineering Office email verification code is: ${code}\n\nThis code expires in 10 minutes.`,
+    html: `
+      <div style="font-family: Arial, sans-serif; color: #1f2937; max-width: 480px;">
+        ${logoHtml}
+        <h2 style="margin: 0 0 8px; color: #7f1d1d;">Email Verification</h2>
+        <p style="margin: 0 0 14px;">Use this 6-digit code to verify your email address for your permit application:</p>
+        <div style="font-size: 28px; font-weight: bold; letter-spacing: 6px; padding: 12px 16px; background: #f3f4f6; border-radius: 8px; text-align: center; color: #111827; margin-bottom: 14px;">
+          ${code}
+        </div>
+        <p style="font-size: 12px; color: #6b7280; margin: 0;">This code expires in 10 minutes. If you did not request this, you can ignore this email.</p>
+      </div>
+    `,
+    ...(logoAttachment ? { attachments: [logoAttachment] } : {}),
+  });
+
+  verificationCodes.set(key, {
+    code,
+    expiresAt: Date.now() + 10 * 60 * 1000,
+    lastSentAt: Date.now(),
+    attempts: 0,
+    verified: false,
+  });
+
+  return { sent: true, to: key };
+}
+
+function verifyEmailVerificationCode(email, code) {
+  const format = validateEmailFormat(email);
+  if (!format.valid) {
+    return { verified: false, error: format.error };
+  }
+  const key = format.email;
+  const entry = verificationCodes.get(key);
+  if (!entry) {
+    return { verified: false, error: 'No verification code found for this email. Please send a new code.' };
+  }
+  if (Date.now() > entry.expiresAt) {
+    verificationCodes.delete(key);
+    return { verified: false, error: 'Verification code has expired. Please request a new code.' };
+  }
+  entry.attempts += 1;
+  if (entry.attempts > 5) {
+    verificationCodes.delete(key);
+    return { verified: false, error: 'Too many invalid attempts. Please request a new code.' };
+  }
+  if (String(code || '').trim() !== entry.code) {
+    return { verified: false, error: 'Incorrect verification code. Please check your inbox and try again.' };
+  }
+  entry.verified = true;
+  return { verified: true, email: key };
+}
+
 module.exports = {
   isValidEmail,
   getSmtpConfig,
@@ -422,4 +512,6 @@ module.exports = {
   sendPermitStatusEmail,
   sendPermitDecisionEmail,
   sendTestEmail,
+  sendEmailVerificationCode,
+  verifyEmailVerificationCode,
 };

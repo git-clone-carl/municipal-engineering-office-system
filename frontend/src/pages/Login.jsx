@@ -8,6 +8,22 @@ import {
 import {
   ELECTRICAL_SUBTYPES, ELECTRICAL_REQUIREMENTS, FALLBACK_REQUIREMENTS, getRequirementsForPermit,
 } from '../constants/permits';
+import EmailVerifyField from '../components/EmailVerifyField';
+import {
+  BUILDING_TYPE_OPTIONS,
+  NATURE_OF_CONSTRUCTION_OPTIONS,
+  filterDecimalInput,
+  filterIntegerInput,
+  filterLabelTextInput,
+  filterLocationInput,
+  filterNameInput,
+  filterPhoneInput,
+  validateEmailFormat,
+  validateNotes,
+  validatePermitDetails,
+  validatePermitSpecs,
+  validatePublicApplicant,
+} from '../utils/validation';
 import bg1 from '../bg/b1.jpg';
 import bg2 from '../bg/b2.jpg';
 import bg3 from '../bg/b3.jpg';
@@ -46,6 +62,9 @@ export default function Login() {
   const [requirementFiles, setRequirementFiles] = useState({});
   const [formError, setFormError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [validatingStep, setValidatingStep] = useState(false);
+  const [natureOther, setNatureOther] = useState(false);
+  const [buildingOther, setBuildingOther] = useState(false);
   const [submittedResult, setSubmittedResult] = useState(null);
 
   // Staff login modal state (triggered from subtle left button)
@@ -96,19 +115,59 @@ export default function Login() {
     setRequirementFiles((prev) => ({ ...prev, [reqName]: file }));
   };
 
-  const handleNextStep = () => {
+  const handleNextStep = async () => {
     setFormError('');
     if (step === 0) {
-      if (!clientForm.full_name.trim() || !clientForm.contact_number.trim() || !clientForm.address.trim()) {
-        setFormError('Please fill in your Full Name, Contact Number, and Address.');
+      const applicantErr = validatePublicApplicant({
+        full_name: clientForm.full_name,
+        contact_number: clientForm.contact_number,
+        address: clientForm.address,
+      });
+      if (applicantErr) {
+        setFormError(applicantErr);
         return;
       }
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientForm.email.trim())) {
-        setFormError('Please enter a valid Email Address (used for permit approval/rejection notifications).');
+      const localEmail = validateEmailFormat(clientForm.email);
+      if (!localEmail.valid) {
+        setFormError(localEmail.error);
         return;
       }
-      if (!clientForm.project_location.trim()) {
-        setFormError('Please enter the Project Location.');
+      setValidatingStep(true);
+      try {
+        const emailCheck = await api.validateEmail(clientForm.email);
+        if (!emailCheck.valid) {
+          setFormError(emailCheck.error || 'Please enter a valid, active email address.');
+          return;
+        }
+      } catch (err) {
+        setFormError(err.message || 'Unable to verify email address.');
+        return;
+      } finally {
+        setValidatingStep(false);
+      }
+
+      const detailsErr = validatePermitDetails({
+        project_location: clientForm.project_location,
+        nature_of_construction: clientForm.nature_of_construction,
+        building_type: clientForm.building_type,
+      });
+      if (detailsErr) {
+        setFormError(detailsErr);
+        return;
+      }
+
+      const specsErr = validatePermitSpecs({
+        total_floor_area: clientForm.total_floor_area,
+        num_storeys: clientForm.num_storeys,
+      });
+      if (specsErr) {
+        setFormError(specsErr);
+        return;
+      }
+
+      const notesErr = validateNotes(clientForm.notes);
+      if (notesErr) {
+        setFormError(notesErr);
         return;
       }
     }
@@ -152,6 +211,8 @@ export default function Login() {
   const resetClientForm = () => {
     setClientForm(createEmptyClientForm());
     setRequirementFiles({});
+    setNatureOther(false);
+    setBuildingOther(false);
     setFormError('');
     setSubmittedResult(null);
     setStep(0);
@@ -290,8 +351,9 @@ export default function Login() {
                       <input
                         className="form-control"
                         placeholder="e.g. Juan Dela Cruz"
+                        maxLength={100}
                         value={clientForm.full_name}
-                        onChange={(e) => setClientForm({ ...clientForm, full_name: e.target.value })}
+                        onChange={(e) => setClientForm({ ...clientForm, full_name: filterNameInput(e.target.value) })}
                       />
                     </div>
                     <div className="form-group">
@@ -299,8 +361,9 @@ export default function Login() {
                       <input
                         className="form-control"
                         placeholder="e.g. 0917-123-4567"
+                        maxLength={20}
                         value={clientForm.contact_number}
-                        onChange={(e) => setClientForm({ ...clientForm, contact_number: e.target.value })}
+                        onChange={(e) => setClientForm({ ...clientForm, contact_number: filterPhoneInput(e.target.value) })}
                       />
                     </div>
                   </div>
@@ -311,21 +374,17 @@ export default function Login() {
                       <input
                         className="form-control"
                         placeholder="Barangay, Municipality, Province"
+                        maxLength={200}
                         value={clientForm.address}
-                        onChange={(e) => setClientForm({ ...clientForm, address: e.target.value })}
+                        onChange={(e) => setClientForm({ ...clientForm, address: filterLocationInput(e.target.value) })}
                       />
                     </div>
-                    <div className="form-group">
-                      <label>Email Address *</label>
-                      <input
-                        className="form-control"
-                        type="email"
-                        placeholder="name@example.com"
-                        value={clientForm.email}
-                        onChange={(e) => setClientForm({ ...clientForm, email: e.target.value })}
-                        required
-                      />
-                    </div>
+                    <EmailVerifyField
+                      label="Email Address *"
+                      value={clientForm.email}
+                      onChange={(val) => setClientForm({ ...clientForm, email: val })}
+                      placeholder="name@gmail.com"
+                    />
                   </div>
 
                   <div className="form-row">
@@ -382,29 +441,68 @@ export default function Login() {
                     <input
                       className="form-control"
                       placeholder="Exact site / barangay of the project"
+                      maxLength={200}
                       value={clientForm.project_location}
-                      onChange={(e) => setClientForm({ ...clientForm, project_location: e.target.value })}
+                      onChange={(e) => setClientForm({ ...clientForm, project_location: filterLocationInput(e.target.value) })}
                     />
                   </div>
 
                   <div className="form-row">
                     <div className="form-group">
                       <label>Nature of Construction</label>
-                      <input
-                        className="form-control"
-                        placeholder="e.g. New Construction, Renovation"
-                        value={clientForm.nature_of_construction}
-                        onChange={(e) => setClientForm({ ...clientForm, nature_of_construction: e.target.value })}
+                      <CustomSelect
+                        value={natureOther ? '__other__' : clientForm.nature_of_construction}
+                        onChange={(val) => {
+                          if (val === '__other__') {
+                            setNatureOther(true);
+                            setClientForm({ ...clientForm, nature_of_construction: '' });
+                          } else {
+                            setNatureOther(false);
+                            setClientForm({ ...clientForm, nature_of_construction: val });
+                          }
+                        }}
+                        placeholder="Select nature of construction"
+                        options={NATURE_OF_CONSTRUCTION_OPTIONS}
+                        style={{ width: '100%' }}
                       />
+                      {natureOther && (
+                        <input
+                          className="form-control"
+                          style={{ marginTop: 6 }}
+                          placeholder="Specify nature of construction"
+                          maxLength={100}
+                          value={clientForm.nature_of_construction}
+                          onChange={(e) => setClientForm({ ...clientForm, nature_of_construction: filterLabelTextInput(e.target.value, 100) })}
+                        />
+                      )}
                     </div>
                     <div className="form-group">
                       <label>Building Type</label>
-                      <input
-                        className="form-control"
-                        placeholder="e.g. Residential, Commercial"
-                        value={clientForm.building_type}
-                        onChange={(e) => setClientForm({ ...clientForm, building_type: e.target.value })}
+                      <CustomSelect
+                        value={buildingOther ? '__other__' : clientForm.building_type}
+                        onChange={(val) => {
+                          if (val === '__other__') {
+                            setBuildingOther(true);
+                            setClientForm({ ...clientForm, building_type: '' });
+                          } else {
+                            setBuildingOther(false);
+                            setClientForm({ ...clientForm, building_type: val });
+                          }
+                        }}
+                        placeholder="Select building type"
+                        options={BUILDING_TYPE_OPTIONS}
+                        style={{ width: '100%' }}
                       />
+                      {buildingOther && (
+                        <input
+                          className="form-control"
+                          style={{ marginTop: 6 }}
+                          placeholder="Specify building type"
+                          maxLength={100}
+                          value={clientForm.building_type}
+                          onChange={(e) => setClientForm({ ...clientForm, building_type: filterLabelTextInput(e.target.value, 100) })}
+                        />
+                      )}
                     </div>
                   </div>
 
@@ -413,32 +511,37 @@ export default function Login() {
                       <label>Estimated Floor Area (sq)</label>
                       <input
                         className="form-control"
-                        type="number"
-                        min="0"
-                        placeholder="Enter floor area in sq"
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="Enter floor area in sq (e.g. 120.5)"
                         value={clientForm.total_floor_area}
-                        onChange={(e) => setClientForm({ ...clientForm, total_floor_area: e.target.value })}
+                        onChange={(e) => setClientForm({ ...clientForm, total_floor_area: filterDecimalInput(e.target.value) })}
                       />
                     </div>
                     <div className="form-group">
                       <label>Number of Storeys</label>
                       <input
                         className="form-control"
-                        type="number"
-                        min="1"
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="1"
                         value={clientForm.num_storeys}
-                        onChange={(e) => setClientForm({ ...clientForm, num_storeys: e.target.value })}
+                        onChange={(e) => setClientForm({ ...clientForm, num_storeys: filterIntegerInput(e.target.value) })}
                       />
                     </div>
                   </div>
 
                   <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label>Notes / Remarks (Optional)</label>
+                    <label style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>Notes / Remarks (Optional)</span>
+                      <span style={{ fontSize: 11, color: 'var(--text-light)' }}>{(clientForm.notes || '').length}/500</span>
+                    </label>
                     <textarea
                       className="form-control"
                       rows={2}
+                      maxLength={500}
                       value={clientForm.notes}
-                      onChange={(e) => setClientForm({ ...clientForm, notes: e.target.value })}
+                      onChange={(e) => setClientForm({ ...clientForm, notes: e.target.value.slice(0, 500) })}
                     />
                   </div>
                 </div>
@@ -554,8 +657,8 @@ export default function Login() {
                     </button>
                   )}
                   {step < FORM_STEPS.length - 1 ? (
-                    <button type="button" className="btn btn-primary" onClick={handleNextStep}>
-                      Next
+                    <button type="button" className="btn btn-primary" onClick={handleNextStep} disabled={validatingStep}>
+                      {validatingStep ? 'Validating...' : 'Next'}
                     </button>
                   ) : (
                     <button type="button" className="btn btn-primary" onClick={handleClientSubmit} disabled={submitting}>

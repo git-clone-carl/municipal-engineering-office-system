@@ -1646,6 +1646,64 @@ tbody tr:last-child td {
     min-width: 580px;
   }
 
+  .mobile-card-table table {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .mobile-card-table thead {
+    display: none;
+  }
+
+  .mobile-card-table tbody tr {
+    display: block;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .mobile-card-table tbody tr:last-child {
+    border-bottom: none;
+  }
+
+  .mobile-card-table tbody td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 5px 0;
+    border: none;
+    text-align: right;
+    word-break: break-word;
+  }
+
+  .mobile-card-table tbody td.mobile-full {
+    flex-direction: column;
+    align-items: flex-start;
+    text-align: left;
+    gap: 4px;
+  }
+
+  .mobile-card-table tbody td::before {
+    content: attr(data-label);
+    font-weight: 700;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-light);
+    flex-shrink: 0;
+    text-align: left;
+  }
+
+  .mobile-card-table tbody td.empty-state {
+    display: block;
+    text-align: center;
+    padding: 20px 12px;
+  }
+
+  .mobile-card-table tbody td.empty-state::before {
+    display: none;
+  }
+
   thead th, tbody td {
     padding: 10px 12px;
     font-size: 12px;

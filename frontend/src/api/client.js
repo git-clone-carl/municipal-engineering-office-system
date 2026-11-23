@@ -31,6 +31,9 @@ export const api = {
   getPermissions: () => request('/auth/permissions'),
   getLanStatus: () => request('/auth/lan-status'),
   getPublicRequirements: () => request('/public/requirements'),
+  validateEmail: (email) => request('/public/validate-email', { method: 'POST', body: JSON.stringify({ email }) }),
+  sendEmailCode: (email) => request('/public/send-email-code', { method: 'POST', body: JSON.stringify({ email }) }),
+  verifyEmailCode: (email, code) => request('/public/verify-email-code', { method: 'POST', body: JSON.stringify({ email, code }) }),
   submitPublicApplication: (formData) => request('/public/apply', { method: 'POST', body: formData }),
 
   getDashboardStats: () => request('/dashboard/stats'),

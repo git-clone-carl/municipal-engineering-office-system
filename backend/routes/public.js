@@ -9,7 +9,11 @@ const {
   PERMIT_TYPES, PERMIT_PREFIXES, ELECTRICAL_SUBTYPES,
   ELECTRICAL_REQUIREMENTS, DEFAULT_REQUIREMENTS, getRequirementsForPermit,
 } = require('../constants/permits');
-const { isValidEmail, sendPermitStatusEmail } = require('../utils/mailer');
+const {
+  isValidEmail, isMailerConfigured, sendPermitStatusEmail,
+  sendEmailVerificationCode, verifyEmailVerificationCode,
+} = require('../utils/mailer');
+const { verifyEmailDeliverable, validatePermitFields } = require('../utils/validation');
 
 const router = express.Router();
 
@@ -61,6 +65,31 @@ router.get('/requirements', (_req, res) => {
   });
 });
 
+router.post('/validate-email', async (req, res) => {
+  const { email } = req.body || {};
+  const result = await verifyEmailDeliverable(email);
+  res.json({ ...result, smtpConfigured: isMailerConfigured() });
+});
+
+router.post('/send-email-code', async (req, res) => {
+  const { email } = req.body || {};
+  try {
+    const result = await sendEmailVerificationCode(email);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Failed to send verification code.' });
+  }
+});
+
+router.post('/verify-email-code', (req, res) => {
+  const { email, code } = req.body || {};
+  const result = verifyEmailVerificationCode(email, code);
+  if (!result.verified) {
+    return res.status(400).json({ error: result.error });
+  }
+  res.json({ success: true, ...result });
+});
+
 router.post('/apply', uploadMultiplePdfs, async (req, res, next) => {
   try {
     const files = req.files || [];
@@ -94,14 +123,23 @@ router.post('/apply', uploadMultiplePdfs, async (req, res, next) => {
     if (!cleanName || !cleanContact || !cleanAddress) {
       return fail(400, 'Full name, contact number, and address are required.');
     }
-    if (!isValidEmail(cleanEmail)) {
-      return fail(400, 'A valid email address is required.');
+    const emailCheck = await verifyEmailDeliverable(cleanEmail);
+    if (!emailCheck.valid) {
+      return fail(400, emailCheck.error || 'A valid email address is required.');
     }
     if (!PERMIT_TYPES.includes(permit_type)) {
       return fail(400, 'Please select a valid permit type.');
     }
-    if (!cleanLocation) {
-      return fail(400, 'Project location is required.');
+    const permitErrors = validatePermitFields({
+      project_location: cleanLocation,
+      nature_of_construction,
+      building_type,
+      total_floor_area,
+      num_storeys,
+      notes,
+    });
+    if (permitErrors.length > 0) {
+      return fail(400, permitErrors[0]);
     }
 
     let requirementNames = [];

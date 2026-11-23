@@ -10,8 +10,19 @@ import { ELECTRICAL_SUBTYPES, getRequirementsForPermit } from '../constants/perm
 import DocumentsPanel from '../components/DocumentsPanel';
 import Receipt from '../components/Receipt';
 import PermitAssessmentSheet from '../components/PermitAssessmentSheet';
-
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+import EmailVerifyField from '../components/EmailVerifyField';
+import {
+  BUILDING_TYPE_OPTIONS,
+  NATURE_OF_CONSTRUCTION_OPTIONS,
+  filterDecimalInput,
+  filterIntegerInput,
+  filterLabelTextInput,
+  filterLocationInput,
+  validateEmailFormat,
+  validateNotes,
+  validatePermitDetails,
+  validatePermitSpecs,
+} from '../utils/validation';
 
 const STEPS = ['Application Details', 'Requirements', 'Payment', 'Review'];
 const STATUS_FLOW = ['submitted', 'for_review', 'for_approval', 'approved', 'paid', 'released'];
@@ -65,6 +76,9 @@ export default function Permits() {
   const [error, setError] = useState('');
   const [requirementFiles, setRequirementFiles] = useState({});
   const [submitting, setSubmitting] = useState(false);
+  const [validatingStep, setValidatingStep] = useState(false);
+  const [natureOther, setNatureOther] = useState(false);
+  const [buildingOther, setBuildingOther] = useState(false);
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -142,6 +156,8 @@ export default function Permits() {
       client_email: myClient?.email || '',
     });
     setRequirementFiles({});
+    setNatureOther(false);
+    setBuildingOther(false);
     setStep(0);
     setError('');
     setPageSuccess('');
@@ -182,7 +198,7 @@ export default function Permits() {
     setRequirementFiles((prev) => ({ ...prev, [reqName]: file }));
   };
 
-  const handleNextStep = () => {
+  const handleNextStep = async () => {
     setError('');
     if (step === 0) {
       const clientId = isClient ? myClient?.id : form.client_id;
@@ -192,12 +208,32 @@ export default function Permits() {
           : 'Please select a client before proceeding.');
         return;
       }
-      if (!EMAIL_REGEX.test(String(form.client_email || '').trim())) {
-        setError('Please enter a valid client email address before proceeding.');
+      const localEmail = validateEmailFormat(form.client_email);
+      if (!localEmail.valid) {
+        setError(localEmail.error);
         return;
       }
-      if (!String(form.project_location || '').trim()) {
-        setError('Please enter the project location before proceeding.');
+      setValidatingStep(true);
+      try {
+        const emailCheck = await api.validateEmail(form.client_email);
+        if (!emailCheck.valid) {
+          setError(emailCheck.error || 'Please enter a valid, active email address.');
+          return;
+        }
+      } catch (err) {
+        setError(err.message || 'Unable to verify email address.');
+        return;
+      } finally {
+        setValidatingStep(false);
+      }
+
+      const detailsErr = validatePermitDetails({
+        project_location: form.project_location,
+        nature_of_construction: form.nature_of_construction,
+        building_type: form.building_type,
+      });
+      if (detailsErr) {
+        setError(detailsErr);
         return;
       }
     }
@@ -205,6 +241,16 @@ export default function Permits() {
       const missing = requiredDocs.filter((r) => !requirementFiles[r]);
       if (missing.length > 0) {
         setError(`You cannot proceed without uploading all required PDF documents. Missing: ${missing.join(', ')}`);
+        return;
+      }
+    }
+    if (step === 2) {
+      const specsErr = validatePermitSpecs({
+        total_floor_area: form.total_floor_area,
+        num_storeys: form.num_storeys,
+      });
+      if (specsErr) {
+        setError(specsErr);
         return;
       }
     }
@@ -224,6 +270,11 @@ export default function Permits() {
     if (missing.length > 0) {
       setError(`Please upload all required PDF documents. Missing: ${missing.join(', ')}`);
       setStep(1);
+      return;
+    }
+    const notesErr = validateNotes(form.notes);
+    if (notesErr) {
+      setError(notesErr);
       return;
     }
 
@@ -455,7 +506,7 @@ export default function Permits() {
             <button className="btn btn-secondary" onClick={() => setModal(null)} disabled={submitting}>Cancel</button>
             {step > 0 && <button className="btn btn-secondary" onClick={() => { setError(''); setStep(step - 1); }} disabled={submitting}>Back</button>}
             {step < STEPS.length - 1
-              ? <button className="btn btn-primary" onClick={handleNextStep}>Next</button>
+              ? <button className="btn btn-primary" onClick={handleNextStep} disabled={validatingStep}>{validatingStep ? 'Validating...' : 'Next'}</button>
               : <button className="btn btn-primary" onClick={handleCreate} disabled={submitting}>{submitting ? 'Submitting...' : 'Submit Application'}</button>}
           </>
         }
@@ -508,17 +559,12 @@ export default function Permits() {
                   <label>Applicant</label>
                   <input className="form-control" value={myClient ? `${myClient.client_id} - ${myClient.full_name}` : 'Loading your profile...'} readOnly />
                 </div>
-                <div className="form-group">
-                  <label>Email Address *</label>
-                  <input
-                    className="form-control"
-                    type="email"
-                    placeholder="client@example.com"
-                    value={form.client_email}
-                    onChange={(e) => setForm({ ...form, client_email: e.target.value })}
-                    required
-                  />
-                </div>
+                <EmailVerifyField
+                  label="Email Address *"
+                  value={form.client_email}
+                  onChange={(val) => setForm({ ...form, client_email: val })}
+                  placeholder="client@gmail.com"
+                />
               </div>
             ) : (
               <div className="form-row">
@@ -535,31 +581,80 @@ export default function Permits() {
                     style={{ width: '100%' }}
                   />
                 </div>
-                <div className="form-group">
-                  <label>Client Email Address *</label>
-                  <input
-                    className="form-control"
-                    type="email"
-                    placeholder="client@example.com"
-                    value={form.client_email}
-                    onChange={(e) => setForm({ ...form, client_email: e.target.value })}
-                    required
-                  />
-                </div>
+                <EmailVerifyField
+                  label="Client Email Address *"
+                  value={form.client_email}
+                  onChange={(val) => setForm({ ...form, client_email: val })}
+                  placeholder="client@gmail.com"
+                />
               </div>
             )}
             <div className="form-group">
-              <label>Project Location</label>
-              <input className="form-control" value={form.project_location} onChange={(e) => setForm({ ...form, project_location: e.target.value })} />
+              <label>Project Location *</label>
+              <input
+                className="form-control"
+                placeholder="e.g. Brgy. Poblacion, Gumaca, Quezon"
+                maxLength={200}
+                value={form.project_location}
+                onChange={(e) => setForm({ ...form, project_location: filterLocationInput(e.target.value) })}
+              />
             </div>
             <div className="form-row-3">
               <div className="form-group">
                 <label>Nature of Construction</label>
-                <input className="form-control" value={form.nature_of_construction} onChange={(e) => setForm({ ...form, nature_of_construction: e.target.value })} />
+                <CustomSelect
+                  value={natureOther ? '__other__' : form.nature_of_construction}
+                  onChange={(val) => {
+                    if (val === '__other__') {
+                      setNatureOther(true);
+                      setForm({ ...form, nature_of_construction: '' });
+                    } else {
+                      setNatureOther(false);
+                      setForm({ ...form, nature_of_construction: val });
+                    }
+                  }}
+                  placeholder="Select nature of construction"
+                  options={NATURE_OF_CONSTRUCTION_OPTIONS}
+                  style={{ width: '100%' }}
+                />
+                {natureOther && (
+                  <input
+                    className="form-control"
+                    style={{ marginTop: 6 }}
+                    placeholder="Specify nature of construction"
+                    maxLength={100}
+                    value={form.nature_of_construction}
+                    onChange={(e) => setForm({ ...form, nature_of_construction: filterLabelTextInput(e.target.value, 100) })}
+                  />
+                )}
               </div>
               <div className="form-group">
                 <label>Building Type</label>
-                <input className="form-control" value={form.building_type} onChange={(e) => setForm({ ...form, building_type: e.target.value })} />
+                <CustomSelect
+                  value={buildingOther ? '__other__' : form.building_type}
+                  onChange={(val) => {
+                    if (val === '__other__') {
+                      setBuildingOther(true);
+                      setForm({ ...form, building_type: '' });
+                    } else {
+                      setBuildingOther(false);
+                      setForm({ ...form, building_type: val });
+                    }
+                  }}
+                  placeholder="Select building type"
+                  options={BUILDING_TYPE_OPTIONS}
+                  style={{ width: '100%' }}
+                />
+                {buildingOther && (
+                  <input
+                    className="form-control"
+                    style={{ marginTop: 6 }}
+                    placeholder="Specify building type"
+                    maxLength={100}
+                    value={form.building_type}
+                    onChange={(e) => setForm({ ...form, building_type: filterLabelTextInput(e.target.value, 100) })}
+                  />
+                )}
               </div>
               {!isClient && (
                 <div className="form-group">
@@ -631,16 +726,23 @@ export default function Permits() {
                   <label>Estimated Floor Area (sq)</label>
                   <input
                     className="form-control"
-                    type="number"
-                    min="0"
-                    placeholder="Enter floor area in sq"
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="Enter floor area in sq (e.g. 120.5)"
                     value={form.total_floor_area}
-                    onChange={(e) => setForm({ ...form, total_floor_area: e.target.value })}
+                    onChange={(e) => setForm({ ...form, total_floor_area: filterDecimalInput(e.target.value) })}
                   />
                 </div>
                 <div className="form-group">
                   <label>Number of Storeys</label>
-                  <input className="form-control" type="number" min="1" value={form.num_storeys} onChange={(e) => setForm({ ...form, num_storeys: e.target.value })} />
+                  <input
+                    className="form-control"
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="1"
+                    value={form.num_storeys}
+                    onChange={(e) => setForm({ ...form, num_storeys: filterIntegerInput(e.target.value) })}
+                  />
                 </div>
               </div>
               <p>Permit fees are calculated from system settings. Payment is only enabled after the Municipal Engineer approves the application.</p>
@@ -658,8 +760,17 @@ export default function Permits() {
               <div className="form-group"><label>Permit Type</label><p>{PERMIT_TYPES[form.permit_type]}</p></div>
               <div className="form-group"><label>Project Location</label><p>{form.project_location || '-'}</p></div>
               <div className="form-group">
-                <label>Notes</label>
-                <textarea className="form-control" rows={4} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+                <label style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Notes</span>
+                  <span style={{ fontSize: 11, color: 'var(--text-light)' }}>{(form.notes || '').length}/500</span>
+                </label>
+                <textarea
+                  className="form-control"
+                  rows={4}
+                  maxLength={500}
+                  value={form.notes}
+                  onChange={(e) => setForm({ ...form, notes: e.target.value.slice(0, 500) })}
+                />
               </div>
             </div>
           </div>
@@ -711,9 +822,9 @@ export default function Permits() {
               </div>
             )}
 
-            <div className="form-row">
+            <div className="form-row" style={{ alignItems: 'start', marginBottom: 16 }}>
               <div>
-                <div className="card" style={{ marginBottom: 16 }}>
+                <div className="card">
                   <div className="card-header"><h3>Application Details</h3></div>
                   <div className="card-body">
                     <div className="doc-field"><span className="label">Application No.</span><span>{selectedPermit.application_no}</span></div>
@@ -740,43 +851,6 @@ export default function Permits() {
                     )}
                   </div>
                 </div>
-
-                <div className="card" style={{ marginBottom: 16 }}>
-                  <div className="card-header"><h3>Requirements Checklist</h3></div>
-                  <div className="table-wrap">
-                    <table>
-                      <thead><tr><th>Requirement</th><th>Status</th><th>Action</th></tr></thead>
-                      <tbody>
-                        {selectedPermit.requirements?.map((r) => (
-                          <tr key={r.id}>
-                            <td>{r.requirement_name}</td>
-                            <td><span className={`badge badge-${r.status}`}>{r.status}</span></td>
-                            <td>
-                              {canReviewDocuments ? (
-                                <select
-                                  className="form-control"
-                                  value={r.status}
-                                  onChange={(e) => handleRequirementToggle(selectedPermit.id, r.id, e.target.value)}
-                                >
-                                  <option value="pending">Pending</option>
-                                  <option value="submitted">Submitted</option>
-                                </select>
-                              ) : (
-                                <span>{r.status === 'submitted' ? 'Submitted' : 'Pending'}</span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                <DocumentsPanel
-                  permit={selectedPermit}
-                  user={user}
-                  onChanged={() => refreshSelected()}
-                />
               </div>
 
               <div>
@@ -855,6 +929,44 @@ export default function Permits() {
                 </div>
               </div>
             </div>
+
+            <div className="card" style={{ marginBottom: 16 }}>
+              <div className="card-header"><h3>Requirements Checklist</h3></div>
+              <div className="table-wrap mobile-card-table">
+                <table>
+                  <thead><tr><th>Requirement</th><th style={{ width: 120 }}>Status</th><th style={{ width: 150 }}>Action</th></tr></thead>
+                  <tbody>
+                    {selectedPermit.requirements?.map((r) => (
+                      <tr key={r.id}>
+                        <td className="mobile-full" data-label="Requirement">{r.requirement_name}</td>
+                        <td data-label="Status"><span className={`badge badge-${r.status}`}>{r.status}</span></td>
+                        <td data-label="Action">
+                          {canReviewDocuments ? (
+                            <CustomSelect
+                              value={r.status}
+                              onChange={(val) => handleRequirementToggle(selectedPermit.id, r.id, val)}
+                              options={[
+                                { value: 'pending', label: 'Pending' },
+                                { value: 'submitted', label: 'Submitted' },
+                              ]}
+                              style={{ minWidth: 135 }}
+                            />
+                          ) : (
+                            <span>{r.status === 'submitted' ? 'Submitted' : 'Pending'}</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <DocumentsPanel
+              permit={selectedPermit}
+              user={user}
+              onChanged={() => refreshSelected()}
+            />
           </>
         )}
       </Modal>

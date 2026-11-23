@@ -172,7 +172,7 @@ export default function DocumentsPanel({ permit, user, onChanged }) {
       {error && <div className="login-error" style={{ margin: 12 }}>{error}</div>}
       {success && <div className="badge badge-active" style={{ margin: 12, display: 'inline-block' }}>{success}</div>}
 
-      <div className="table-wrap">
+      <div className="table-wrap mobile-card-table">
         {loading ? <div className="loading">Loading documents...</div> : (
           <table>
             <thead>
@@ -190,7 +190,7 @@ export default function DocumentsPanel({ permit, user, onChanged }) {
                 <tr><td colSpan={6} className="empty-state">No PDF documents uploaded yet.</td></tr>
               ) : documents.map((doc) => (
                 <tr key={doc.id}>
-                  <td>
+                  <td className="mobile-full" data-label="Document">
                     <div className="doc-name-cell">
                       <Icon name="file" size={16} />
                       <div>
@@ -199,16 +199,16 @@ export default function DocumentsPanel({ permit, user, onChanged }) {
                       </div>
                     </div>
                   </td>
-                  <td>{doc.document_type}</td>
-                  <td>{formatDate(doc.uploaded_at)}</td>
-                  <td>
+                  <td className="mobile-full" data-label="Type">{doc.document_type}</td>
+                  <td data-label="Uploaded">{formatDate(doc.uploaded_at)}</td>
+                  <td data-label="Status">
                     <span className={`badge badge-${doc.status}`}>{DOCUMENT_STATUS_LABELS[doc.status] || doc.status}</span>
                   </td>
-                  <td className="doc-remarks">
+                  <td className="doc-remarks" data-label="Remarks">
                     {doc.remarks || '-'}
                     {doc.reviewed_by_name && <div className="doc-meta">by {doc.reviewed_by_name}</div>}
                   </td>
-                  <td>
+                  <td data-label="Actions">
                     <div className="table-actions">
                       <button type="button" className="btn-icon" title="View PDF" onClick={() => setViewTarget(doc)}>
                         <Icon name="view" size={16} />

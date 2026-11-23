@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 
 export function Icon({ name, size = 18 }) {
   const icons = {
@@ -47,10 +48,14 @@ export function CustomSelect({ value, onChange, options, placeholder = 'Select o
   const [openUp, setOpenUp] = useState(false);
   const [pos, setPos] = useState(null);
   const containerRef = useRef(null);
+  const dropdownRef = useRef(null);
 
   useEffect(() => {
     function handleClickOutside(event) {
-      if (containerRef.current && !containerRef.current.contains(event.target)) {
+      if (
+        containerRef.current && !containerRef.current.contains(event.target) &&
+        (!dropdownRef.current || !dropdownRef.current.contains(event.target))
+      ) {
         setOpen(false);
       }
     }
@@ -102,8 +107,12 @@ export function CustomSelect({ value, onChange, options, placeholder = 'Select o
         </svg>
       </div>
 
-      {open && (
-        <div className={`custom-select-dropdown ${openUp ? 'open-up' : ''}`} style={pos ? { position: 'fixed', ...pos } : undefined}>
+      {open && createPortal(
+        <div
+          ref={dropdownRef}
+          className={`custom-select-dropdown ${openUp ? 'open-up' : ''}`}
+          style={pos ? { position: 'fixed', zIndex: 9999, top: 'auto', bottom: 'auto', ...pos } : { zIndex: 9999 }}
+        >
           {options.map((opt) => {
             const isSelected = String(opt.value) === String(value);
             return (
@@ -124,7 +133,8 @@ export function CustomSelect({ value, onChange, options, placeholder = 'Select o
               </div>
             );
           })}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

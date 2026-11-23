@@ -9,6 +9,7 @@ const {
   PERMIT_TYPES, PERMIT_PREFIXES, ELECTRICAL_SUBTYPES, getRequirementsForPermit,
 } = require('../constants/permits');
 const { sendPermitStatusEmail, isValidEmail } = require('../utils/mailer');
+const { verifyEmailDeliverable, validatePermitFields } = require('../utils/validation');
 
 const router = express.Router();
 
@@ -159,12 +160,24 @@ router.post('/', authenticate, checkPermission('permits'), async (req, res, next
     if (!client) return res.status(400).json({ error: 'Client not found' });
 
     const cleanEmail = String(client_email || client.email || '').trim();
-    if (!isValidEmail(cleanEmail)) {
-      return res.status(400).json({ error: 'A valid client email address is required' });
+    const emailCheck = await verifyEmailDeliverable(cleanEmail);
+    if (!emailCheck.valid) {
+      return res.status(400).json({ error: emailCheck.error || 'A valid client email address is required' });
     }
-    if (client_email && cleanEmail !== String(client.email || '').trim()) {
+    const permitErrors = validatePermitFields({
+      project_location,
+      nature_of_construction,
+      building_type,
+      total_floor_area,
+      num_storeys,
+      notes,
+    });
+    if (permitErrors.length > 0) {
+      return res.status(400).json({ error: permitErrors[0] });
+    }
+    if (client_email && emailCheck.email !== String(client.email || '').trim().toLowerCase()) {
       db.prepare('UPDATE clients SET email = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-        .run(cleanEmail, client.id);
+        .run(emailCheck.email, client.id);
     }
 
     const resolvedSubtype = permit_type === 'electrical'
@@ -243,6 +256,19 @@ router.put('/:id', authenticate, checkPermission('permits'), (req, res) => {
 
   // Financial fields (total_fee, amount_paid) are deliberately excluded. They
   // are set from system settings at creation and by the payment transaction.
+  const merged = {
+    project_location: req.body.project_location !== undefined ? req.body.project_location : permit.project_location,
+    nature_of_construction: req.body.nature_of_construction !== undefined ? req.body.nature_of_construction : permit.nature_of_construction,
+    building_type: req.body.building_type !== undefined ? req.body.building_type : permit.building_type,
+    total_floor_area: req.body.total_floor_area !== undefined ? req.body.total_floor_area : permit.total_floor_area,
+    num_storeys: req.body.num_storeys !== undefined ? req.body.num_storeys : permit.num_storeys,
+    notes: req.body.notes !== undefined ? req.body.notes : permit.notes,
+  };
+  const permitErrors = validatePermitFields(merged);
+  if (permitErrors.length > 0) {
+    return res.status(400).json({ error: permitErrors[0] });
+  }
+
   const fields = ['project_location', 'nature_of_construction', 'building_type', 'total_floor_area',
     'num_storeys', 'assigned_staff_id', 'notes'];
   const updates = [];
