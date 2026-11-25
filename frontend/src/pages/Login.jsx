@@ -1,29 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { api } from '../api/client';
-import {
-  Modal, CustomSelect, CustomDatePicker, Icon,
-  PERMIT_TYPES, formatCurrency, formatFileSize,
-} from '../components/UI';
-import {
-  ELECTRICAL_SUBTYPES, ELECTRICAL_REQUIREMENTS, FALLBACK_REQUIREMENTS, getRequirementsForPermit,
-} from '../constants/permits';
-import EmailVerifyField from '../components/EmailVerifyField';
-import {
-  BUILDING_TYPE_OPTIONS,
-  NATURE_OF_CONSTRUCTION_OPTIONS,
-  filterDecimalInput,
-  filterIntegerInput,
-  filterLabelTextInput,
-  filterLocationInput,
-  filterNameInput,
-  filterPhoneInput,
-  validateEmailFormat,
-  validateNotes,
-  validatePermitDetails,
-  validatePermitSpecs,
-  validatePublicApplicant,
-} from '../utils/validation';
+import { Modal } from '../components/UI';
 import bg1 from '../bg/b1.jpg';
 import bg2 from '../bg/b2.jpg';
 import bg3 from '../bg/b3.jpg';
@@ -33,42 +10,20 @@ import bg6 from '../bg/b6.jpg';
 
 const BACKGROUNDS = [bg1, bg2, bg3, bg4, bg5, bg6];
 
-const FORM_STEPS = ['Applicant & Permit Details', 'Upload Requirements', 'Review & Submit'];
-
-const createEmptyClientForm = () => ({
-  full_name: '',
-  contact_number: '',
-  email: '',
-  address: '',
-  permit_type: 'building',
-  electrical_subtype: 'electrification',
-  application_date: new Date().toISOString().split('T')[0],
-  project_location: '',
-  nature_of_construction: '',
-  building_type: '',
-  total_floor_area: '',
-  num_storeys: 1,
-  notes: '',
-});
+const ROLES = [
+  { key: 'engineering_staff', label: 'Staff', title: 'Engineering Staff' },
+  { key: 'municipal_engineer', label: 'Engr.', title: 'Municipal Engineer' },
+  { key: 'admin', label: 'Admin', title: 'System Administrator' },
+];
 
 export default function Login() {
-  const { login } = useAuth();
+  const { login, register } = useAuth();
 
-  // Client application form state
-  const [step, setStep] = useState(0);
-  const [clientForm, setClientForm] = useState(createEmptyClientForm);
-  const [requirementsMap, setRequirementsMap] = useState(FALLBACK_REQUIREMENTS);
-  const [electricalSubtypesMap, setElectricalSubtypesMap] = useState(ELECTRICAL_REQUIREMENTS);
-  const [requirementFiles, setRequirementFiles] = useState({});
-  const [formError, setFormError] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [validatingStep, setValidatingStep] = useState(false);
-  const [natureOther, setNatureOther] = useState(false);
-  const [buildingOther, setBuildingOther] = useState(false);
-  const [submittedResult, setSubmittedResult] = useState(null);
+  const [selectedRole, setSelectedRole] = useState('engineering_staff');
+  const [authMode, setAuthMode] = useState('login'); // 'login' | 'signup'
+  const [signupModalOpen, setSignupModalOpen] = useState(false);
 
-  // Staff login modal state (triggered from subtle left button)
-  const [staffLoginOpen, setStaffLoginOpen] = useState(false);
+  // Login state
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [remember, setRemember] = useState(false);
@@ -76,21 +31,23 @@ export default function Login() {
   const [loginError, setLoginError] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
 
-  const [termsOpen, setTermsOpen] = useState(false);
+  // Sign up state (no email required)
+  const [signupForm, setSignupForm] = useState({
+    full_name: '',
+    username: '',
+    password: '',
+    confirm_password: '',
+  });
+  const [signupError, setSignupError] = useState('');
+  const [signupLoading, setSignupLoading] = useState(false);
   const [bgIndex, setBgIndex] = useState(0);
 
   useEffect(() => {
     const saved = localStorage.getItem('remember_user');
-    if (saved) { setUsername(saved); setRemember(true); }
-  }, []);
-
-  useEffect(() => {
-    api.getPublicRequirements()
-      .then((res) => {
-        if (res?.requirements) setRequirementsMap(res.requirements);
-        if (res?.electricalSubtypes) setElectricalSubtypesMap(res.electricalSubtypes);
-      })
-      .catch(() => {});
+    if (saved) {
+      setUsername(saved);
+      setRemember(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -98,124 +55,11 @@ export default function Login() {
     return () => clearInterval(timer);
   }, []);
 
-  const requiredDocs = getRequirementsForPermit(
-    clientForm.permit_type,
-    clientForm.electrical_subtype,
-    requirementsMap,
-    electricalSubtypesMap,
-  );
-
-  const handleReqFileChange = (reqName, file) => {
-    setFormError('');
-    if (!file) return;
-    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
-      setFormError(`"${file.name}" is not a PDF file. Only PDF files are allowed.`);
-      return;
-    }
-    setRequirementFiles((prev) => ({ ...prev, [reqName]: file }));
-  };
-
-  const handleNextStep = async () => {
-    setFormError('');
-    if (step === 0) {
-      const applicantErr = validatePublicApplicant({
-        full_name: clientForm.full_name,
-        contact_number: clientForm.contact_number,
-        address: clientForm.address,
-      });
-      if (applicantErr) {
-        setFormError(applicantErr);
-        return;
-      }
-      const localEmail = validateEmailFormat(clientForm.email);
-      if (!localEmail.valid) {
-        setFormError(localEmail.error);
-        return;
-      }
-      setValidatingStep(true);
-      try {
-        const emailCheck = await api.validateEmail(clientForm.email);
-        if (!emailCheck.valid) {
-          setFormError(emailCheck.error || 'Please enter a valid, active email address.');
-          return;
-        }
-      } catch (err) {
-        setFormError(err.message || 'Unable to verify email address.');
-        return;
-      } finally {
-        setValidatingStep(false);
-      }
-
-      const detailsErr = validatePermitDetails({
-        project_location: clientForm.project_location,
-        nature_of_construction: clientForm.nature_of_construction,
-        building_type: clientForm.building_type,
-      });
-      if (detailsErr) {
-        setFormError(detailsErr);
-        return;
-      }
-
-      const specsErr = validatePermitSpecs({
-        total_floor_area: clientForm.total_floor_area,
-        num_storeys: clientForm.num_storeys,
-      });
-      if (specsErr) {
-        setFormError(specsErr);
-        return;
-      }
-
-      const notesErr = validateNotes(clientForm.notes);
-      if (notesErr) {
-        setFormError(notesErr);
-        return;
-      }
-    }
-    if (step === 1) {
-      const missing = requiredDocs.filter((r) => !requirementFiles[r]);
-      if (missing.length > 0) {
-        setFormError(`You cannot proceed without uploading all required PDF documents. Missing: ${missing.join(', ')}`);
-        return;
-      }
-    }
-    setStep((s) => s + 1);
-  };
-
-  const handleClientSubmit = async () => {
-    setFormError('');
-    const missing = requiredDocs.filter((r) => !requirementFiles[r]);
-    if (missing.length > 0) {
-      setFormError(`Please upload all required PDF documents. Missing: ${missing.join(', ')}`);
-      setStep(1);
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      const fd = new FormData();
-      Object.entries(clientForm).forEach(([k, v]) => fd.append(k, String(v ?? '')));
-      fd.append('requirement_names', JSON.stringify(requiredDocs));
-      requiredDocs.forEach((reqName) => {
-        fd.append('files', requirementFiles[reqName]);
-      });
-
-      const result = await api.submitPublicApplication(fd);
-      setSubmittedResult(result);
-    } catch (err) {
-      setFormError(err.message || 'Failed to submit application');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const resetClientForm = () => {
-    setClientForm(createEmptyClientForm());
-    setRequirementFiles({});
-    setNatureOther(false);
-    setBuildingOther(false);
-    setFormError('');
-    setSubmittedResult(null);
-    setStep(0);
+  const handleRoleChange = (roleKey) => {
+    setSelectedRole(roleKey);
+    setAuthMode('login');
+    setLoginError('');
+    setSignupError('');
   };
 
   const handleLoginSubmit = async (e) => {
@@ -223,18 +67,106 @@ export default function Login() {
     setLoginError('');
     setLoginLoading(true);
     try {
-      await login(username, password);
-      if (remember) localStorage.setItem('remember_user', username);
+      await login(username.trim(), password);
+      if (remember) localStorage.setItem('remember_user', username.trim());
       else localStorage.removeItem('remember_user');
     } catch (err) {
-      setLoginError(err.message || 'Login failed');
+      setLoginError(err.message || 'Invalid username or password');
     } finally {
       setLoginLoading(false);
     }
   };
 
+  const handleSignupSubmit = async (e) => {
+    e.preventDefault();
+    setSignupError('');
+    const fullName = signupForm.full_name.trim();
+    const cleanUser = signupForm.username.trim();
+    if (!fullName || !cleanUser || !signupForm.password) {
+      setSignupError('Full name, username, and password are required.');
+      return;
+    }
+    if (cleanUser.length < 3) {
+      setSignupError('Username must be at least 3 characters.');
+      return;
+    }
+    if (signupForm.password.length < 6) {
+      setSignupError('Password must be at least 6 characters.');
+      return;
+    }
+    if (signupForm.password !== signupForm.confirm_password) {
+      setSignupError('Passwords do not match.');
+      return;
+    }
+
+    setSignupLoading(true);
+    try {
+      await register({
+        full_name: fullName,
+        username: cleanUser,
+        password: signupForm.password,
+        role: selectedRole,
+      });
+    } catch (err) {
+      setSignupError(err.message || 'Sign up failed');
+    } finally {
+      setSignupLoading(false);
+    }
+  };
+
+  const activeRoleObj = ROLES.find((r) => r.key === selectedRole) || ROLES[0];
+  const isStaff = selectedRole === 'engineering_staff';
+
+  const renderSignupFields = () => (
+    <>
+      {signupError && <div className="login-error">{signupError}</div>}
+      <div className="form-group">
+        <label>Full Name *</label>
+        <input
+          className="form-control"
+          placeholder="Enter full name"
+          value={signupForm.full_name}
+          onChange={(e) => setSignupForm({ ...signupForm, full_name: e.target.value })}
+          required
+        />
+      </div>
+      <div className="form-group">
+        <label>Username *</label>
+        <input
+          className="form-control"
+          placeholder="Choose a username"
+          value={signupForm.username}
+          onChange={(e) => setSignupForm({ ...signupForm, username: e.target.value })}
+          required
+        />
+      </div>
+      <div className="form-group">
+        <label>Password *</label>
+        <input
+          className="form-control"
+          type="password"
+          placeholder="At least 6 characters"
+          value={signupForm.password}
+          onChange={(e) => setSignupForm({ ...signupForm, password: e.target.value })}
+          required
+        />
+      </div>
+      <div className="form-group">
+        <label>Confirm Password *</label>
+        <input
+          className="form-control"
+          type="password"
+          placeholder="Re-enter password"
+          value={signupForm.confirm_password}
+          onChange={(e) => setSignupForm({ ...signupForm, confirm_password: e.target.value })}
+          required
+        />
+      </div>
+    </>
+  );
+
   return (
-    <div className="login-page" style={{ padding: '24px 16px' }}>
+    <div className="fb-login-page">
       <div className="login-bg">
         {BACKGROUNDS.map((src, i) => (
           <img key={src} src={src} alt="" className={`login-bg-img ${i === bgIndex ? 'active' : ''}`} />
@@ -242,545 +174,180 @@ export default function Login() {
         <div className="login-bg-overlay" />
       </div>
 
-      {/* Subtle hidden staff login button on the left */}
-      <button
-        type="button"
-        onClick={() => { setLoginError(''); setStaffLoginOpen(true); }}
-        title="Staff Login"
-        style={{
-          position: 'fixed',
-          left: 16,
-          bottom: 16,
-          zIndex: 30,
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 6,
-          padding: '6px 11px',
-          borderRadius: 999,
-          border: '1px solid rgba(255, 255, 255, 0.22)',
-          background: 'rgba(17, 24, 39, 0.35)',
-          backdropFilter: 'blur(6px)',
-          color: 'rgba(255, 255, 255, 0.72)',
-          fontSize: 11.5,
-          fontWeight: 600,
-          cursor: 'pointer',
-          opacity: 0.45,
-          transition: 'opacity 0.2s ease, background 0.2s ease',
-        }}
-        onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.background = 'rgba(17, 24, 39, 0.75)'; }}
-        onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.45'; e.currentTarget.style.background = 'rgba(17, 24, 39, 0.35)'; }}
-      >
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-          <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-        </svg>
-        <span>Staff</span>
-      </button>
-
-      <div className="login-card" style={{ maxWidth: 760, width: '100%' }}>
-        <div className="login-header-banner">
-          <img src="/gumacalogo.png" alt="Municipality of Gumaca" className="login-gumaca-banner" />
+      <div className="fb-login-container">
+        {/* Left Branding Column with MEO Logo */}
+        <div className="fb-login-brand">
+          <img src="/gumacalogo.png" alt="MEO Logo" className="fb-meo-logo" />
+          <div className="fb-brand-badge">Official Engineering Portal</div>
+          <h1 className="fb-brand-title">Municipal Engineering Office</h1>
+          <p className="fb-brand-subtitle">
+            Streamlined permit applications, PDF document review, and real-time engineering approvals.
+          </p>
+          <div className="fb-brand-highlights">
+            <span>Permit Processing</span>
+            <span>PDF Review &amp; Archive</span>
+            <span>Real-Time Updates</span>
+          </div>
         </div>
 
-        <div className="login-body" style={{ padding: '24px 28px' }}>
-          <h1>MUNICIPAL ENGINEERING OFFICE</h1>
-          <p className="subtitle" style={{ marginBottom: 18 }}>
-            Municipality of Gumaca, Quezon • Client Permit Application Form
-          </p>
-
-          {submittedResult ? (
-            <div style={{ textAlign: 'center', padding: '12px 4px' }}>
-              <div
-                style={{
-                  width: 56, height: 56, borderRadius: '50%',
-                  background: 'rgba(22, 163, 74, 0.14)', color: 'var(--green-800)',
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12,
-                }}
-              >
-                <Icon name="check" size={28} />
-              </div>
-              <h2 style={{ margin: '0 0 6px', fontSize: 20 }}>Application Submitted!</h2>
-              <p className="page-subtitle" style={{ marginBottom: 18 }}>
-                Your permit application and required PDF documents have been received by the Municipal Engineering Office.
-                {submittedResult.email_sent && submittedResult.email_to
-                  ? ` A confirmation email has been sent to ${submittedResult.email_to}.`
-                  : ''}
-              </p>
-
-              <div
-                style={{
-                  textAlign: 'left',
-                  padding: 16,
-                  borderRadius: 'var(--radius-subcard)',
-                  border: '1px solid var(--border-color)',
-                  background: 'var(--bg-subcard)',
-                  marginBottom: 18,
-                }}
-              >
-                <div className="doc-field"><span className="label">Application No.</span><strong>{submittedResult.application_no}</strong></div>
-                <div className="doc-field"><span className="label">Client ID</span><span>{submittedResult.client_code}</span></div>
-                <div className="doc-field"><span className="label">Applicant Name</span><span>{submittedResult.client_name}</span></div>
-                <div className="doc-field"><span className="label">Permit Type</span><span>{PERMIT_TYPES[submittedResult.permit_type] || submittedResult.permit_type}</span></div>
-                <div className="doc-field"><span className="label">Project Location</span><span>{submittedResult.project_location}</span></div>
-                <div className="doc-field"><span className="label">Uploaded Requirements</span><span>{submittedResult.uploaded_count} PDF file(s)</span></div>
-                <div className="doc-field"><span className="label">Estimated Permit Fee</span><strong>{formatCurrency(submittedResult.total_fee)}</strong></div>
-              </div>
-
-              <button type="button" className="btn btn-primary" onClick={resetClientForm}>
-                Submit Another Application
-              </button>
+        {/* Right Login Card Column */}
+        <div className="fb-login-card-wrap">
+          <div className="fb-login-card">
+            <div className="fb-card-header">
+              <h2>{authMode === 'login' ? 'Welcome back' : 'Create account'}</h2>
+              <p>{activeRoleObj.title}</p>
             </div>
-          ) : (
-            <>
-              <div className="stepper" style={{ marginBottom: 18 }}>
-                {FORM_STEPS.map((label, i) => (
-                  <div key={label} className={`step ${i === step ? 'active' : i < step ? 'done' : ''}`}>
-                    <div className="step-num">{i + 1}</div>
-                    <div className="step-label">{label}</div>
-                  </div>
-                ))}
-              </div>
 
-              {formError && <div className="login-error" style={{ marginBottom: 14 }}>{formError}</div>}
-
-              {step === 0 && (
-                <div>
-                  <div className="form-row">
-                    <div className="form-group">
-                      <label>Full Name *</label>
-                      <input
-                        className="form-control"
-                        placeholder="e.g. Juan Dela Cruz"
-                        maxLength={100}
-                        value={clientForm.full_name}
-                        onChange={(e) => setClientForm({ ...clientForm, full_name: filterNameInput(e.target.value) })}
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label>Contact Number *</label>
-                      <input
-                        className="form-control"
-                        placeholder="e.g. 0917-123-4567"
-                        maxLength={20}
-                        value={clientForm.contact_number}
-                        onChange={(e) => setClientForm({ ...clientForm, contact_number: filterPhoneInput(e.target.value) })}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="form-row">
-                    <div className="form-group">
-                      <label>Address *</label>
-                      <input
-                        className="form-control"
-                        placeholder="Barangay, Municipality, Province"
-                        maxLength={200}
-                        value={clientForm.address}
-                        onChange={(e) => setClientForm({ ...clientForm, address: filterLocationInput(e.target.value) })}
-                      />
-                    </div>
-                    <EmailVerifyField
-                      label="Email Address *"
-                      value={clientForm.email}
-                      onChange={(val) => setClientForm({ ...clientForm, email: val })}
-                      placeholder="name@gmail.com"
-                    />
-                  </div>
-
-                  <div className="form-row">
-                    <div className="form-group">
-                      <label>Permit Type *</label>
-                      <CustomSelect
-                        value={clientForm.permit_type}
-                        onChange={(val) => {
-                          setClientForm({ ...clientForm, permit_type: val });
-                          setRequirementFiles({});
-                        }}
-                        options={Object.entries(PERMIT_TYPES).map(([key, label]) => ({ value: key, label }))}
-                        style={{ width: '100%' }}
-                      />
-                    </div>
-                    {clientForm.permit_type === 'electrical' ? (
-                      <div className="form-group">
-                        <label>Electrical Application Type *</label>
-                        <CustomSelect
-                          value={clientForm.electrical_subtype}
-                          onChange={(val) => {
-                            setClientForm({ ...clientForm, electrical_subtype: val });
-                            setRequirementFiles({});
-                          }}
-                          options={Object.entries(ELECTRICAL_SUBTYPES).map(([key, label]) => ({ value: key, label }))}
-                          style={{ width: '100%' }}
-                        />
-                      </div>
-                    ) : (
-                      <div className="form-group">
-                        <label>Application Date</label>
-                        <CustomDatePicker
-                          value={clientForm.application_date}
-                          onChange={(val) => setClientForm({ ...clientForm, application_date: val })}
-                          style={{ width: '100%' }}
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  {clientForm.permit_type === 'electrical' && (
-                    <div className="form-group">
-                      <label>Application Date</label>
-                      <CustomDatePicker
-                        value={clientForm.application_date}
-                        onChange={(val) => setClientForm({ ...clientForm, application_date: val })}
-                        style={{ width: '100%' }}
-                      />
-                    </div>
-                  )}
-
-                  <div className="form-group">
-                    <label>Project Location *</label>
-                    <input
-                      className="form-control"
-                      placeholder="Exact site / barangay of the project"
-                      maxLength={200}
-                      value={clientForm.project_location}
-                      onChange={(e) => setClientForm({ ...clientForm, project_location: filterLocationInput(e.target.value) })}
-                    />
-                  </div>
-
-                  <div className="form-row">
-                    <div className="form-group">
-                      <label>Nature of Construction</label>
-                      <CustomSelect
-                        value={natureOther ? '__other__' : clientForm.nature_of_construction}
-                        onChange={(val) => {
-                          if (val === '__other__') {
-                            setNatureOther(true);
-                            setClientForm({ ...clientForm, nature_of_construction: '' });
-                          } else {
-                            setNatureOther(false);
-                            setClientForm({ ...clientForm, nature_of_construction: val });
-                          }
-                        }}
-                        placeholder="Select nature of construction"
-                        options={NATURE_OF_CONSTRUCTION_OPTIONS}
-                        style={{ width: '100%' }}
-                      />
-                      {natureOther && (
-                        <input
-                          className="form-control"
-                          style={{ marginTop: 6 }}
-                          placeholder="Specify nature of construction"
-                          maxLength={100}
-                          value={clientForm.nature_of_construction}
-                          onChange={(e) => setClientForm({ ...clientForm, nature_of_construction: filterLabelTextInput(e.target.value, 100) })}
-                        />
-                      )}
-                    </div>
-                    <div className="form-group">
-                      <label>Building Type</label>
-                      <CustomSelect
-                        value={buildingOther ? '__other__' : clientForm.building_type}
-                        onChange={(val) => {
-                          if (val === '__other__') {
-                            setBuildingOther(true);
-                            setClientForm({ ...clientForm, building_type: '' });
-                          } else {
-                            setBuildingOther(false);
-                            setClientForm({ ...clientForm, building_type: val });
-                          }
-                        }}
-                        placeholder="Select building type"
-                        options={BUILDING_TYPE_OPTIONS}
-                        style={{ width: '100%' }}
-                      />
-                      {buildingOther && (
-                        <input
-                          className="form-control"
-                          style={{ marginTop: 6 }}
-                          placeholder="Specify building type"
-                          maxLength={100}
-                          value={clientForm.building_type}
-                          onChange={(e) => setClientForm({ ...clientForm, building_type: filterLabelTextInput(e.target.value, 100) })}
-                        />
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="form-row">
-                    <div className="form-group">
-                      <label>Estimated Floor Area (sq)</label>
-                      <input
-                        className="form-control"
-                        type="text"
-                        inputMode="decimal"
-                        placeholder="Enter floor area in sq (e.g. 120.5)"
-                        value={clientForm.total_floor_area}
-                        onChange={(e) => setClientForm({ ...clientForm, total_floor_area: filterDecimalInput(e.target.value) })}
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label>Number of Storeys</label>
-                      <input
-                        className="form-control"
-                        type="text"
-                        inputMode="numeric"
-                        placeholder="1"
-                        value={clientForm.num_storeys}
-                        onChange={(e) => setClientForm({ ...clientForm, num_storeys: filterIntegerInput(e.target.value) })}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Notes / Remarks (Optional)</span>
-                      <span style={{ fontSize: 11, color: 'var(--text-light)' }}>{(clientForm.notes || '').length}/500</span>
-                    </label>
-                    <textarea
-                      className="form-control"
-                      rows={2}
-                      maxLength={500}
-                      value={clientForm.notes}
-                      onChange={(e) => setClientForm({ ...clientForm, notes: e.target.value.slice(0, 500) })}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {step === 1 && (
-                <div>
-                  <p style={{ marginBottom: 12, fontSize: 13.5 }}>
-                    Upload all required PDF documents for <strong>{PERMIT_TYPES[clientForm.permit_type]}</strong>. You cannot proceed without uploading every requirement.
-                  </p>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {requiredDocs.map((reqName) => {
-                      const file = requirementFiles[reqName];
-                      return (
-                        <div
-                          key={reqName}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            gap: 12,
-                            padding: '10px 12px',
-                            borderRadius: 'var(--radius-subcard)',
-                            border: `1px solid ${file ? 'var(--green-600)' : 'var(--border-color)'}`,
-                            background: file ? 'rgba(22, 163, 74, 0.06)' : 'var(--bg-subcard)',
-                          }}
-                        >
-                          <div style={{ minWidth: 0 }}>
-                            <div style={{ fontWeight: 600, fontSize: 13.5 }}>{reqName} *</div>
-                            <div style={{ fontSize: 12, color: file ? 'var(--green-800)' : 'var(--text-light)' }}>
-                              {file ? `Uploaded: ${file.name} (${formatFileSize(file.size)})` : 'Required (PDF only, max 10 MB)'}
-                            </div>
-                          </div>
-                          <label className="btn btn-secondary" style={{ cursor: 'pointer', whiteSpace: 'nowrap', margin: 0 }}>
-                            <Icon name="upload" size={14} /> {file ? 'Change PDF' : 'Upload PDF'}
-                            <input
-                              type="file"
-                              accept=".pdf,application/pdf"
-                              style={{ display: 'none' }}
-                              onChange={(e) => handleReqFileChange(reqName, e.target.files?.[0])}
-                            />
-                          </label>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {step === 2 && (
-                <div>
-                  <div
-                    style={{
-                      padding: 14,
-                      borderRadius: 'var(--radius-subcard)',
-                      border: '1px solid var(--border-color)',
-                      background: 'var(--bg-subcard)',
-                      marginBottom: 12,
-                    }}
-                  >
-                    <div className="doc-field"><span className="label">Full Name</span><span>{clientForm.full_name}</span></div>
-                    <div className="doc-field"><span className="label">Contact Number</span><span>{clientForm.contact_number}</span></div>
-                    <div className="doc-field"><span className="label">Email Address</span><span>{clientForm.email}</span></div>
-                    <div className="doc-field"><span className="label">Address</span><span>{clientForm.address}</span></div>
-                    <div className="doc-field">
-                      <span className="label">Permit Type</span>
-                      <span>
-                        {PERMIT_TYPES[clientForm.permit_type]}
-                        {clientForm.permit_type === 'electrical' && ELECTRICAL_SUBTYPES[clientForm.electrical_subtype]
-                          ? ` — ${ELECTRICAL_SUBTYPES[clientForm.electrical_subtype]}`
-                          : ''}
-                      </span>
-                    </div>
-                    <div className="doc-field"><span className="label">Project Location</span><span>{clientForm.project_location}</span></div>
-                    <div className="doc-field">
-                      <span className="label">Estimated Floor Area (sq)</span>
-                      <span>{clientForm.total_floor_area ? `${clientForm.total_floor_area} sq` : '-'}</span>
-                    </div>
-                    <div className="doc-field"><span className="label">Number of Storeys</span><span>{clientForm.num_storeys || 1}</span></div>
-                  </div>
-                  <div
-                    style={{
-                      padding: 14,
-                      borderRadius: 'var(--radius-subcard)',
-                      border: '1px solid var(--border-color)',
-                      background: 'var(--bg-subcard)',
-                    }}
-                  >
-                    <strong style={{ display: 'block', marginBottom: 8, fontSize: 13 }}>Uploaded Requirements ({requiredDocs.length})</strong>
-                    {requiredDocs.map((reqName) => (
-                      <div key={reqName} className="doc-field">
-                        <span className="label">{reqName}</span>
-                        <span>{requirementFiles[reqName]?.name || '-'}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 18, gap: 10 }}>
-                <button type="button" className="terms-link" onClick={() => setTermsOpen(true)}>
-                  Terms &amp; Services
+            {/* Role Tabs: Staff | Engr. | Admin */}
+            <div className="fb-role-tabs" role="tablist" aria-label="Account Role">
+              {ROLES.map((r) => (
+                <button
+                  key={r.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={selectedRole === r.key}
+                  className={`fb-role-tab ${selectedRole === r.key ? 'active' : ''}`}
+                  onClick={() => handleRoleChange(r.key)}
+                >
+                  {r.label}
                 </button>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  {step > 0 && (
+              ))}
+            </div>
+
+            {/* For Engr. and Admin: Show both Log In and Sign Up toggles */}
+            {!isStaff && (
+              <div className="fb-auth-toggle">
+                <button
+                  type="button"
+                  className={`fb-auth-toggle-btn ${authMode === 'login' ? 'active' : ''}`}
+                  onClick={() => { setAuthMode('login'); setSignupError(''); }}
+                >
+                  Log In
+                </button>
+                <button
+                  type="button"
+                  className={`fb-auth-toggle-btn ${authMode === 'signup' ? 'active' : ''}`}
+                  onClick={() => { setAuthMode('signup'); setLoginError(''); }}
+                >
+                  Sign Up
+                </button>
+              </div>
+            )}
+
+            {authMode === 'login' ? (
+              <form onSubmit={handleLoginSubmit}>
+                {loginError && <div className="login-error">{loginError}</div>}
+                <div className="form-group">
+                  <label>Username</label>
+                  <input
+                    className="form-control fb-input"
+                    placeholder="Enter your username"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    required
+                    autoFocus
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Password</label>
+                  <div className="password-field">
+                    <input
+                      className="form-control fb-input"
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder="Enter your password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      required
+                    />
                     <button
                       type="button"
-                      className="btn btn-secondary"
-                      onClick={() => { setFormError(''); setStep((s) => s - 1); }}
-                      disabled={submitting}
+                      className="password-toggle"
+                      onClick={() => setShowPassword(!showPassword)}
+                      title={showPassword ? 'Hide password' : 'Show password'}
                     >
-                      Back
+                      {showPassword ? 'Hide' : 'Show'}
                     </button>
-                  )}
-                  {step < FORM_STEPS.length - 1 ? (
-                    <button type="button" className="btn btn-primary" onClick={handleNextStep} disabled={validatingStep}>
-                      {validatingStep ? 'Validating...' : 'Next'}
-                    </button>
-                  ) : (
-                    <button type="button" className="btn btn-primary" onClick={handleClientSubmit} disabled={submitting}>
-                      {submitting ? 'Submitting...' : 'Submit Application'}
-                    </button>
-                  )}
+                  </div>
                 </div>
-              </div>
-            </>
-          )}
+
+                <div className="form-group" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                  <label htmlFor="remember" className="ui-checkbox-label" style={{ margin: 0 }}>
+                    <input
+                      type="checkbox"
+                      id="remember"
+                      className="ui-checkbox"
+                      checked={remember}
+                      onChange={(e) => setRemember(e.target.checked)}
+                    />
+                    <span>Remember Me</span>
+                  </label>
+                </div>
+
+                <button
+                  type="submit"
+                  className="btn btn-primary fb-login-btn"
+                  disabled={loginLoading}
+                >
+                  {loginLoading ? 'Logging in...' : 'Log In'}
+                </button>
+
+                {/* For Staff: Sign Up button at the bottom like Facebook */}
+                {isStaff && (
+                  <>
+                    <div className="fb-divider" />
+                    <div style={{ textAlign: 'center' }}>
+                      <button
+                        type="button"
+                        className="btn fb-signup-btn"
+                        onClick={() => {
+                          setSignupError('');
+                          setSignupForm({ full_name: '', username: '', password: '', confirm_password: '' });
+                          setSignupModalOpen(true);
+                        }}
+                      >
+                        Sign Up
+                      </button>
+                    </div>
+                  </>
+                )}
+              </form>
+            ) : (
+              <form onSubmit={handleSignupSubmit}>
+                {renderSignupFields()}
+                <button
+                  type="submit"
+                  className="btn fb-signup-btn"
+                  style={{ width: '100%' }}
+                  disabled={signupLoading}
+                >
+                  {signupLoading ? 'Creating account...' : `Sign Up as ${activeRoleObj.label}`}
+                </button>
+              </form>
+            )}
+          </div>
+          <p className="fb-login-footer">
+            <strong>MEO</strong> &middot; Municipal Engineering Office System
+          </p>
         </div>
       </div>
 
-      {/* Staff Login Modal */}
+      {/* Staff Sign Up Modal (triggered from Sign Up button at the bottom of Staff Login) */}
       <Modal
-        open={staffLoginOpen}
-        onClose={() => setStaffLoginOpen(false)}
-        title="Staff & Official Login"
+        open={signupModalOpen}
+        onClose={() => setSignupModalOpen(false)}
+        title="Sign Up — Engineering Staff"
       >
-        {loginError && <div className="login-error">{loginError}</div>}
-        <form onSubmit={handleLoginSubmit}>
-          <div className="form-group">
-            <label>Username</label>
-            <input
-              className="form-control"
-              placeholder="Enter your username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              required
-              autoFocus
-            />
+        <form onSubmit={handleSignupSubmit}>
+          {renderSignupFields()}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+            <button type="button" className="btn btn-secondary" onClick={() => setSignupModalOpen(false)}>
+              Cancel
+            </button>
+            <button type="submit" className="btn fb-signup-btn" disabled={signupLoading}>
+              {signupLoading ? 'Creating account...' : 'Sign Up'}
+            </button>
           </div>
-          <div className="form-group">
-            <label>Password</label>
-            <div className="password-field">
-              <input
-                className="form-control"
-                type={showPassword ? 'text' : 'password'}
-                placeholder="Enter your password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-              <button
-                type="button"
-                className="password-toggle"
-                onClick={() => setShowPassword(!showPassword)}
-                title={showPassword ? 'Hide password' : 'Show password'}
-              >
-                {showPassword ? (
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19M14.12 14.12a3 3 0 11-4.24-4.24M1 1l22 22" />
-                  </svg>
-                ) : (
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                    <circle cx="12" cy="12" r="3" />
-                  </svg>
-                )}
-              </button>
-            </div>
-          </div>
-          <div className="form-group" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <label htmlFor="remember" className="ui-checkbox-label">
-              <input type="checkbox" id="remember" className="ui-checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-              <span>Remember Me</span>
-            </label>
-          </div>
-          <button className="btn btn-primary" style={{ width: '100%', padding: '11px' }} disabled={loginLoading}>
-            {loginLoading ? 'Signing in...' : 'SIGN IN TO DASHBOARD'}
-          </button>
         </form>
-      </Modal>
-
-      <Modal open={termsOpen} onClose={() => setTermsOpen(false)} title="Terms of Service & Data Privacy Notice" large>
-        <div className="terms-content">
-          <h4>1. Terms of Service</h4>
-          <p>
-            By accessing the Municipal Engineering Office Online Portal of the Municipality of Gumaca, Quezon,
-            you agree to use this system solely for official and lawful purposes. Unauthorized access, tampering,
-            or misuse of this portal is prohibited and may be subject to applicable laws and administrative sanctions.
-          </p>
-
-          <h4>2. Data Privacy Act of 2012 (Republic Act No. 10173)</h4>
-          <p>
-            The Municipality of Gumaca, through its Municipal Engineering Office, is committed to protecting your
-            personal information in accordance with the <strong>Data Privacy Act of 2012 (RA 10173)</strong> and
-            its Implementing Rules and Regulations, as supervised by the <strong>National Privacy Commission (NPC)</strong>.
-          </p>
-
-          <h4>3. Personal Data Collected</h4>
-          <p>
-            We collect only personal information necessary for the processing of permit applications, payments,
-            and official records &mdash; such as full name, address, contact details, and permit-related documents.
-          </p>
-
-          <h4>4. Purpose and Consent</h4>
-          <p>
-            Your data is processed solely for the legitimate functions of the Municipal Engineering Office.
-            By using this portal, you consent to the collection, use, and storage of your personal information
-            for these declared purposes only.
-          </p>
-
-          <h4>5. Rights of the Data Subject</h4>
-          <p>
-            Under RA 10173, you have the right to be informed, to access, to object, to rectify or correct,
-            to erasure or blocking, to data portability, and to lodge complaints before the National Privacy
-            Commission regarding the processing of your personal data.
-          </p>
-
-          <h4>6. Security Measures</h4>
-          <p>
-            We implement appropriate organizational, physical, and technical security measures to safeguard your
-            personal information from unauthorized access, disclosure, alteration, or destruction.
-          </p>
-
-          <h4>7. Questions or Concerns</h4>
-          <p>
-            For inquiries or complaints regarding data privacy, you may contact the Municipal Engineering Office
-            of Gumaca, Quezon, or file a complaint with the National Privacy Commission.
-          </p>
-        </div>
       </Modal>
     </div>
   );

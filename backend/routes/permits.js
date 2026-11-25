@@ -8,8 +8,7 @@ const {
 const {
   PERMIT_TYPES, PERMIT_PREFIXES, ELECTRICAL_SUBTYPES, getRequirementsForPermit,
 } = require('../constants/permits');
-const { sendPermitStatusEmail, isValidEmail } = require('../utils/mailer');
-const { verifyEmailDeliverable, validatePermitFields } = require('../utils/validation');
+const { validatePermitFields } = require('../utils/validation');
 
 const router = express.Router();
 
@@ -46,11 +45,12 @@ function loadPermit(req, res) {
 }
 
 router.get('/', authenticate, checkPermission('permits'), (req, res) => {
-  const { search, status, type, page = 1, limit = 10 } = req.query;
+  const { search, status, type, archived = '0', page = 1, limit = 10 } = req.query;
   const pageNumber = Math.max(1, Number(page) || 1);
   const limitNumber = Math.min(200, Math.max(1, Number(limit) || 10));
   const offset = (pageNumber - 1) * limitNumber;
-  let where = '1=1';
+  const showArchived = archived === '1' && ['admin', 'municipal_engineer'].includes(req.user.role);
+  let where = showArchived ? 'COALESCE(p.is_archived, 0) = 1' : 'COALESCE(p.is_archived, 0) = 0';
   const params = [];
 
   // Client accounts only ever see their own applications.
@@ -160,10 +160,6 @@ router.post('/', authenticate, checkPermission('permits'), async (req, res, next
     if (!client) return res.status(400).json({ error: 'Client not found' });
 
     const cleanEmail = String(client_email || client.email || '').trim();
-    const emailCheck = await verifyEmailDeliverable(cleanEmail);
-    if (!emailCheck.valid) {
-      return res.status(400).json({ error: emailCheck.error || 'A valid client email address is required' });
-    }
     const permitErrors = validatePermitFields({
       project_location,
       nature_of_construction,
@@ -175,9 +171,9 @@ router.post('/', authenticate, checkPermission('permits'), async (req, res, next
     if (permitErrors.length > 0) {
       return res.status(400).json({ error: permitErrors[0] });
     }
-    if (client_email && emailCheck.email !== String(client.email || '').trim().toLowerCase()) {
+    if (cleanEmail && cleanEmail !== String(client.email || '').trim().toLowerCase()) {
       db.prepare('UPDATE clients SET email = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-        .run(emailCheck.email, client.id);
+        .run(cleanEmail, client.id);
     }
 
     const resolvedSubtype = permit_type === 'electrical'
@@ -216,26 +212,10 @@ router.post('/', authenticate, checkPermission('permits'), async (req, res, next
     notifyClient(permitId, 'Application Submitted',
       `Your ${permit_type} permit application ${application_no} was submitted successfully`, 'info');
 
-    const office = db.prepare('SELECT * FROM office_info WHERE id = 1').get();
-    const emailResult = await sendPermitStatusEmail({
-      to: cleanEmail,
-      clientName: client.full_name,
-      applicationNo: application_no,
-      permitType: permit_type,
-      status: 'submitted',
-      remarks: notes || '',
-      totalFee: total_fee,
-      projectLocation: project_location || '',
-      office,
-    });
-
     res.status(201).json({
       id: permitId,
       application_no,
       status: 'submitted',
-      email_sent: emailResult.sent,
-      email_to: emailResult.to || null,
-      email_error: emailResult.error || null,
     });
   } catch (err) {
     next(err);
@@ -331,25 +311,9 @@ router.post('/:id/review', authenticate, checkPermission('permits'),
       notifyClient(permit.id, 'Application Under Review',
         `Your application ${permit.application_no} is now under review by WNGR staff`, 'info');
 
-      const client = db.prepare('SELECT full_name, email FROM clients WHERE id = ?').get(permit.client_id);
-      const office = db.prepare('SELECT * FROM office_info WHERE id = 1').get();
-      const emailResult = await sendPermitStatusEmail({
-        to: client?.email,
-        clientName: client?.full_name,
-        applicationNo: permit.application_no,
-        permitType: permit.permit_type,
-        status: 'for_review',
-        totalFee: permit.total_fee,
-        projectLocation: permit.project_location,
-        office,
-      });
-
       res.json({
         success: true,
         status: 'for_review',
-        email_sent: emailResult.sent,
-        email_to: emailResult.to || null,
-        email_error: emailResult.error || null,
       });
     } catch (err) {
       next(err);
@@ -375,25 +339,9 @@ router.post('/:id/forward', authenticate, checkPermission('permits'),
       notifyClient(permit.id, 'Forwarded for Approval',
         `Your application ${permit.application_no} was forwarded to the Municipal Engineer`, 'info');
 
-      const client = db.prepare('SELECT full_name, email FROM clients WHERE id = ?').get(permit.client_id);
-      const office = db.prepare('SELECT * FROM office_info WHERE id = 1').get();
-      const emailResult = await sendPermitStatusEmail({
-        to: client?.email,
-        clientName: client?.full_name,
-        applicationNo: permit.application_no,
-        permitType: permit.permit_type,
-        status: 'for_approval',
-        totalFee: permit.total_fee,
-        projectLocation: permit.project_location,
-        office,
-      });
-
       res.json({
         success: true,
         status: 'for_approval',
-        email_sent: emailResult.sent,
-        email_to: emailResult.to || null,
-        email_error: emailResult.error || null,
       });
     } catch (err) {
       next(err);
@@ -436,31 +384,15 @@ router.post('/:id/approve', authenticate, checkPermission('permits'),
 
       logAudit(req.user.id, req.user.username, req.user.role,
         `Approved permit ${permit.application_no}${remarks ? `: ${remarks}` : ''}`, getClientIp(req));
+      const remarksSuffix = remarks ? `. Remarks: ${remarks}` : '';
       notifyClient(permit.id, 'Application Approved',
-        `Your application ${permit.application_no} was approved by the Municipal Engineer`, 'success');
+        `Your application ${permit.application_no} was approved by the Municipal Engineer${remarksSuffix}`, 'success');
       notifyRole(['engineering_staff', 'admin'], 'Approved Application Ready for Payment',
-        `Application ${permit.application_no} was approved by the Municipal Engineer and is ready for payment`, 'success', permit.id);
-
-      const client = db.prepare('SELECT full_name, email FROM clients WHERE id = ?').get(permit.client_id);
-      const office = db.prepare('SELECT * FROM office_info WHERE id = 1').get();
-      const emailResult = await sendPermitStatusEmail({
-        to: client?.email,
-        clientName: client?.full_name,
-        applicationNo: permit.application_no,
-        permitType: permit.permit_type,
-        status: 'approved',
-        remarks,
-        totalFee: permit.total_fee,
-        projectLocation: permit.project_location,
-        office,
-      });
+        `Application ${permit.application_no} was approved by the Municipal Engineer and is ready for payment${remarksSuffix}`, 'success', permit.id);
 
       res.json({
         success: true,
         status: 'approved',
-        email_sent: emailResult.sent,
-        email_to: emailResult.to || null,
-        email_error: emailResult.error || null,
       });
     } catch (err) {
       next(err);
@@ -507,26 +439,9 @@ router.post('/:id/reject', authenticate, checkPermission('permits'),
       notifyRole(['engineering_staff', 'admin'], 'Application Disapproved',
         `Application ${permit.application_no} was disapproved. Reason: ${remarks}`, 'danger', permit.id);
 
-      const client = db.prepare('SELECT full_name, email FROM clients WHERE id = ?').get(permit.client_id);
-      const office = db.prepare('SELECT * FROM office_info WHERE id = 1').get();
-      const emailResult = await sendPermitStatusEmail({
-        to: client?.email,
-        clientName: client?.full_name,
-        applicationNo: permit.application_no,
-        permitType: permit.permit_type,
-        status: 'rejected',
-        remarks,
-        totalFee: permit.total_fee,
-        projectLocation: permit.project_location,
-        office,
-      });
-
       res.json({
         success: true,
         status: 'rejected',
-        email_sent: emailResult.sent,
-        email_to: emailResult.to || null,
-        email_error: emailResult.error || null,
       });
     } catch (err) {
       next(err);
@@ -553,29 +468,43 @@ router.post('/:id/release', authenticate, checkPermission('permits'),
       notifyClient(permit.id, 'Permit Released',
         `Your permit ${permit.application_no} has been released`, 'success');
 
-      const client = db.prepare('SELECT full_name, email FROM clients WHERE id = ?').get(permit.client_id);
-      const office = db.prepare('SELECT * FROM office_info WHERE id = 1').get();
-      const emailResult = await sendPermitStatusEmail({
-        to: client?.email,
-        clientName: client?.full_name,
-        applicationNo: permit.application_no,
-        permitType: permit.permit_type,
-        status: 'released',
-        totalFee: permit.total_fee,
-        projectLocation: permit.project_location,
-        office,
-      });
-
       res.json({
         success: true,
         status: 'released',
-        email_sent: emailResult.sent,
-        email_to: emailResult.to || null,
-        email_error: emailResult.error || null,
       });
     } catch (err) {
       next(err);
     }
+  });
+
+/** Admin / Municipal Engineer: archive a permit application. */
+router.put('/:id/archive', authenticate, checkPermission('permits'),
+  requireRole('admin', 'municipal_engineer'), (req, res) => {
+    const permit = loadPermit(req, res);
+    if (!permit) return;
+    db.prepare(`
+      UPDATE permits
+      SET is_archived = 1, archived_at = CURRENT_TIMESTAMP, archived_by = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(req.user.id, permit.id);
+    logAudit(req.user.id, req.user.username, req.user.role,
+      `Archived permit ${permit.application_no}`, getClientIp(req));
+    res.json({ success: true, is_archived: true });
+  });
+
+/** Admin / Municipal Engineer: restore an archived permit application. */
+router.put('/:id/restore', authenticate, checkPermission('permits'),
+  requireRole('admin', 'municipal_engineer'), (req, res) => {
+    const permit = loadPermit(req, res);
+    if (!permit) return;
+    db.prepare(`
+      UPDATE permits
+      SET is_archived = 0, archived_at = NULL, archived_by = NULL, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(permit.id);
+    logAudit(req.user.id, req.user.username, req.user.role,
+      `Restored permit ${permit.application_no} from archive`, getClientIp(req));
+    res.json({ success: true, is_archived: false });
   });
 
 module.exports = router;

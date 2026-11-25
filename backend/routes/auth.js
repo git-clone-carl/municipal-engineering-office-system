@@ -3,9 +3,10 @@ const bcrypt = require('bcryptjs');
 const db = require('../database/db');
 const { signToken, authenticate } = require('../middleware/auth');
 const { logAudit, getClientIp } = require('../middleware/rbac');
-const { isValidEmail } = require('../utils/mailer');
 
 const router = express.Router();
+
+const ALLOWED_SIGNUP_ROLES = ['engineering_staff', 'municipal_engineer', 'admin', 'viewer'];
 
 router.post('/login', (req, res) => {
   const { username, password } = req.body;
@@ -38,14 +39,11 @@ router.post('/login', (req, res) => {
  */
 router.post('/register', (req, res) => {
   const {
-    username, password, full_name, email, contact_number, address,
+    username, password, full_name, role, email, contact_number, address,
   } = req.body;
 
   if (!username || !password || !full_name) {
     return res.status(400).json({ error: 'Full name, username, and password are required' });
-  }
-  if (!isValidEmail(email)) {
-    return res.status(400).json({ error: 'A valid email address is required' });
   }
   if (String(username).trim().length < 3) {
     return res.status(400).json({ error: 'Username must be at least 3 characters long' });
@@ -54,6 +52,7 @@ router.post('/register', (req, res) => {
     return res.status(400).json({ error: 'Password must be at least 6 characters long' });
   }
 
+  const userRole = ALLOWED_SIGNUP_ROLES.includes(role) ? role : 'engineering_staff';
   const cleanUsername = String(username).trim();
   const cleanName = String(full_name).trim();
   const existingUser = db.prepare('SELECT id FROM users WHERE username = ?').get(cleanUsername);
@@ -64,10 +63,9 @@ router.post('/register', (req, res) => {
   const hash = bcrypt.hashSync(password, 10);
   const count = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
   const user_id = `USR-${String(count + 1).padStart(3, '0')}`;
-  const userRole = 'viewer'; // Client portal account
 
   let newUserId;
-  let linkedClientId;
+  let linkedClientId = null;
   db.exec('BEGIN IMMEDIATE');
   try {
     const result = db.prepare(`
@@ -76,26 +74,27 @@ router.post('/register', (req, res) => {
     `).run(user_id, cleanUsername, hash, cleanName, userRole);
     newUserId = Number(result.lastInsertRowid);
 
-    // Link to an existing unlinked client with the same name, or create one.
-    const existingClient = db.prepare(
-      'SELECT id FROM clients WHERE full_name = ? AND user_id IS NULL ORDER BY id LIMIT 1'
-    ).get(cleanName);
-    if (existingClient) {
-      db.prepare(`
-        UPDATE clients SET user_id = ?, email = COALESCE(NULLIF(?, ''), email),
-          contact_number = COALESCE(NULLIF(?, ''), contact_number),
-          address = COALESCE(NULLIF(?, ''), address), updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `).run(newUserId, email || '', contact_number || '', address || '', existingClient.id);
-      linkedClientId = existingClient.id;
-    } else {
-      const clientCount = db.prepare('SELECT COUNT(*) as c FROM clients').get().c;
-      const client_id = `CL-${new Date().getFullYear()}-${String(clientCount + 1).padStart(5, '0')}`;
-      const clientResult = db.prepare(`
-        INSERT INTO clients (client_id, full_name, contact_number, email, address, user_id, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-      `).run(client_id, cleanName, contact_number || '', email || '', address || '', newUserId);
-      linkedClientId = Number(clientResult.lastInsertRowid);
+    if (userRole === 'viewer') {
+      const existingClient = db.prepare(
+        'SELECT id FROM clients WHERE full_name = ? AND user_id IS NULL ORDER BY id LIMIT 1'
+      ).get(cleanName);
+      if (existingClient) {
+        db.prepare(`
+          UPDATE clients SET user_id = ?, email = COALESCE(NULLIF(?, ''), email),
+            contact_number = COALESCE(NULLIF(?, ''), contact_number),
+            address = COALESCE(NULLIF(?, ''), address), updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).run(newUserId, email || '', contact_number || '', address || '', existingClient.id);
+        linkedClientId = existingClient.id;
+      } else {
+        const clientCount = db.prepare('SELECT COUNT(*) as c FROM clients').get().c;
+        const client_id = `CL-${new Date().getFullYear()}-${String(clientCount + 1).padStart(5, '0')}`;
+        const clientResult = db.prepare(`
+          INSERT INTO clients (client_id, full_name, contact_number, email, address, user_id, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        `).run(client_id, cleanName, contact_number || '', email || '', address || '', newUserId);
+        linkedClientId = Number(clientResult.lastInsertRowid);
+      }
     }
     db.exec('COMMIT');
   } catch (err) {
@@ -112,7 +111,7 @@ router.post('/register', (req, res) => {
   };
 
   const token = signToken(newUser);
-  logAudit(newUser.id, newUser.username, newUser.role, 'Created client account', getClientIp(req));
+  logAudit(newUser.id, newUser.username, newUser.role, `Created ${userRole} account`, getClientIp(req));
 
   res.status(201).json({
     token,

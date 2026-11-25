@@ -10,7 +10,6 @@ import { ELECTRICAL_SUBTYPES, getRequirementsForPermit } from '../constants/perm
 import DocumentsPanel from '../components/DocumentsPanel';
 import Receipt from '../components/Receipt';
 import PermitAssessmentSheet from '../components/PermitAssessmentSheet';
-import EmailVerifyField from '../components/EmailVerifyField';
 import {
   BUILDING_TYPE_OPTIONS,
   NATURE_OF_CONSTRUCTION_OPTIONS,
@@ -18,7 +17,8 @@ import {
   filterIntegerInput,
   filterLabelTextInput,
   filterLocationInput,
-  validateEmailFormat,
+  filterNameInput,
+  filterPhoneInput,
   validateNotes,
   validatePermitDetails,
   validatePermitSpecs,
@@ -31,7 +31,10 @@ const emptyForm = {
   permit_type: 'building',
   electrical_subtype: 'electrification',
   client_id: '',
-  client_email: '',
+  client_mode: 'existing',
+  new_client_name: '',
+  new_client_contact: '',
+  new_client_address: '',
   application_date: new Date().toISOString().split('T')[0],
   project_location: '',
   nature_of_construction: '',
@@ -49,6 +52,7 @@ export default function Permits() {
   const isStaff = ['engineering_staff', 'admin'].includes(user?.role);
   const isEngineer = user?.role === 'municipal_engineer';
   const canReviewDocuments = ['admin', 'engineering_staff', 'municipal_engineer'].includes(user?.role);
+  const canArchive = ['admin', 'municipal_engineer'].includes(user?.role);
 
   const [permits, setPermits] = useState([]);
   const [total, setTotal] = useState(0);
@@ -79,11 +83,20 @@ export default function Permits() {
   const [validatingStep, setValidatingStep] = useState(false);
   const [natureOther, setNatureOther] = useState(false);
   const [buildingOther, setBuildingOther] = useState(false);
+  const [viewTab, setViewTab] = useState('details');
+  const [archiveView, setArchiveView] = useState('active');
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const data = await api.getPermits({ search, status, type, page, limit: 10 });
+      const data = await api.getPermits({
+        search,
+        status,
+        type,
+        archived: canArchive && archiveView === 'archived' ? '1' : '0',
+        page,
+        limit: 10,
+      });
       setPermits(data.permits);
       setTotal(data.total);
     } catch (err) {
@@ -91,7 +104,7 @@ export default function Permits() {
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [page, search, status, type]);
+  }, [page, search, status, type, archiveView, canArchive]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -100,6 +113,23 @@ export default function Permits() {
     if (querySearch !== null) {
       setSearch(querySearch);
       setPage(1);
+    }
+    const action = searchParams.get('action');
+    if (action === 'new') {
+      setSearchParams({}, { replace: true });
+      setForm({
+        ...emptyForm,
+        client_id: myClient?.id ? String(myClient.id) : '',
+      });
+      setRequirementFiles({});
+      setNatureOther(false);
+      setBuildingOther(false);
+      setStep(0);
+      setError('');
+      setPageSuccess('');
+      setSelectedPermit(null);
+      setModal('create');
+      return;
     }
     const openId = searchParams.get('open');
     if (!openId) return;
@@ -112,7 +142,7 @@ export default function Permits() {
         setModal('view');
       })
       .catch(() => {});
-  }, [searchParams, setSearchParams]);
+  }, [searchParams, setSearchParams, myClient]);
 
   // Poll so status changes made on another laptop appear without a manual reload.
   useEffect(() => {
@@ -153,7 +183,6 @@ export default function Permits() {
     setForm({
       ...emptyForm,
       client_id: myClient?.id ? String(myClient.id) : '',
-      client_email: myClient?.email || '',
     });
     setRequirementFiles({});
     setNatureOther(false);
@@ -168,12 +197,34 @@ export default function Permits() {
   const openView = async (permit) => {
     setViewError('');
     setViewSuccess('');
+    setViewTab('details');
     try {
       const data = await api.getPermit(permit.id);
       setSelectedPermit(data);
       setModal('view');
     } catch (err) {
       alert(err.message);
+    }
+  };
+
+  const handleArchivePermit = async (permit) => {
+    if (!confirm(`Archive application ${permit.application_no}?`)) return;
+    try {
+      await api.archivePermit(permit.id);
+      setPageSuccess(`Application ${permit.application_no} moved to Archive.`);
+      await load(true);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handleRestorePermit = async (permit) => {
+    try {
+      await api.restorePermit(permit.id);
+      setPageSuccess(`Application ${permit.application_no} restored from Archive.`);
+      await load(true);
+    } catch (err) {
+      setError(err.message);
     }
   };
 
@@ -201,30 +252,23 @@ export default function Permits() {
   const handleNextStep = async () => {
     setError('');
     if (step === 0) {
-      const clientId = isClient ? myClient?.id : form.client_id;
-      if (!clientId) {
-        setError(isClient
-          ? 'Your client profile is still loading. Please try again.'
-          : 'Please select a client before proceeding.');
-        return;
-      }
-      const localEmail = validateEmailFormat(form.client_email);
-      if (!localEmail.valid) {
-        setError(localEmail.error);
-        return;
-      }
-      setValidatingStep(true);
-      try {
-        const emailCheck = await api.validateEmail(form.client_email);
-        if (!emailCheck.valid) {
-          setError(emailCheck.error || 'Please enter a valid, active email address.');
+      if (isClient) {
+        if (!myClient?.id) {
+          setError('Your client profile is still loading. Please try again.');
           return;
         }
-      } catch (err) {
-        setError(err.message || 'Unable to verify email address.');
+      } else if (form.client_mode === 'new') {
+        if (!String(form.new_client_name || '').trim()) {
+          setError('Client Full Name is required.');
+          return;
+        }
+        if (!String(form.new_client_address || '').trim()) {
+          setError('Client Address is required.');
+          return;
+        }
+      } else if (!form.client_id) {
+        setError('Please select a client or switch to New Walk-in Client.');
         return;
-      } finally {
-        setValidatingStep(false);
       }
 
       const detailsErr = validatePermitDetails({
@@ -258,8 +302,14 @@ export default function Permits() {
   };
 
   const handleCreate = async () => {
-    const clientId = isClient ? myClient?.id : form.client_id;
-    if (!clientId) {
+    let clientId = isClient ? myClient?.id : form.client_id;
+    if (!isClient && form.client_mode === 'new') {
+      if (!String(form.new_client_name || '').trim()) {
+        setError('Client Full Name is required.');
+        setStep(0);
+        return;
+      }
+    } else if (!clientId) {
       setError(isClient
         ? 'Your client profile is still loading. Please try again.'
         : 'Please select a client.');
@@ -281,6 +331,18 @@ export default function Permits() {
     setSubmitting(true);
     setError('');
     try {
+      if (!isClient && form.client_mode === 'new') {
+        const createdClient = await api.createClient({
+          full_name: form.new_client_name.trim(),
+          contact_number: form.new_client_contact.trim(),
+          address: form.new_client_address.trim(),
+        });
+        clientId = createdClient.id;
+        api.getClients({ search: '', page: 1, limit: 1000 })
+          .then((d) => setClients(d.clients))
+          .catch(() => {});
+      }
+
       const created = await api.createPermit({
         ...form,
         client_id: Number(clientId),
@@ -309,12 +371,7 @@ export default function Permits() {
 
       setModal(null);
       setViewSuccess('');
-      const emailMsg = created?.email_sent
-        ? ` Email notification sent to ${created.email_to}.`
-        : created?.email_error
-          ? ` (Email not sent: ${created.email_error})`
-          : '';
-      setPageSuccess(`Application ${created.application_no} submitted.${emailMsg}`);
+      setPageSuccess(`Application ${created.application_no} submitted.`);
       await load(true);
     } catch (err) {
       setError(err.message);
@@ -331,12 +388,7 @@ export default function Permits() {
       const result = await action();
       await load(true);
       await refreshSelected();
-      const emailMsg = result?.email_sent
-        ? ` Email notification sent to ${result.email_to}.`
-        : result?.email_error
-          ? ` (Email not sent: ${result.email_error})`
-          : '';
-      setViewSuccess(`${successMessage}${emailMsg}`);
+      setViewSuccess(successMessage);
     } catch (err) {
       setViewError(err.message);
     } finally {
@@ -376,12 +428,7 @@ export default function Permits() {
       const baseMsg = decision === 'approve'
         ? 'Application approved. Payment can now be processed.'
         : 'Application rejected.';
-      const emailMsg = result?.email_sent
-        ? ` Email notification sent to ${result.email_to}.`
-        : result?.email_error
-          ? ` (Email not sent: ${result.email_error})`
-          : '';
-      setViewSuccess(`${baseMsg}${emailMsg}`);
+      setViewSuccess(baseMsg);
     } catch (err) {
       setDecisionError(err.message);
     } finally {
@@ -410,6 +457,25 @@ export default function Permits() {
 
       {error && <div className="login-error">{error}</div>}
       {pageSuccess && <div className="badge badge-active" style={{ display: 'inline-block', marginBottom: 12 }}>{pageSuccess}</div>}
+
+      {canArchive && (
+        <div className="tabs" style={{ marginBottom: 14 }}>
+          <button
+            type="button"
+            className={`tab ${archiveView === 'active' ? 'active' : ''}`}
+            onClick={() => { setArchiveView('active'); setPage(1); }}
+          >
+            Active Applications
+          </button>
+          <button
+            type="button"
+            className={`tab ${archiveView === 'archived' ? 'active' : ''}`}
+            onClick={() => { setArchiveView('archived'); setPage(1); }}
+          >
+            Archived Applications
+          </button>
+        </div>
+      )}
 
       <div className="toolbar">
         <div className="toolbar-left">
@@ -479,10 +545,44 @@ export default function Permits() {
                     <td>{formatCurrency(p.total_fee)}</td>
                     <td>{formatCurrency(p.amount_paid)}</td>
                     <td>{p.document_count || 0}</td>
-                    <td style={{ display: 'flex', gap: 4 }}>
-                      <button className="btn-icon" onClick={() => openView(p)} title="View"><Icon name="view" size={16} /></button>
+                    <td style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => openView(p)}>
+                        Review
+                      </button>
                       {!isClient && (
-                        <button className="btn-icon" onClick={() => openPreview(p)} title="Preview"><Icon name="print" size={16} /></button>
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => openPreview(p)}>
+                          Preview
+                        </button>
+                      )}
+                      {isEngineer && archiveView === 'active' && p.status === 'for_approval' && (
+                        <button
+                          type="button"
+                          className="btn btn-success btn-sm"
+                          onClick={async () => {
+                            await openView(p);
+                            openDecision('approve');
+                          }}
+                        >
+                          Approve
+                        </button>
+                      )}
+                      {canArchive && archiveView === 'active' && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => handleArchivePermit(p)}
+                        >
+                          Archive
+                        </button>
+                      )}
+                      {canArchive && archiveView === 'archived' && (
+                        <button
+                          type="button"
+                          className="btn btn-success btn-sm"
+                          onClick={() => handleRestorePermit(p)}
+                        >
+                          Restore
+                        </button>
                       )}
                     </td>
                   </tr>
@@ -554,39 +654,71 @@ export default function Permits() {
               </div>
             )}
             {isClient ? (
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Applicant</label>
-                  <input className="form-control" value={myClient ? `${myClient.client_id} - ${myClient.full_name}` : 'Loading your profile...'} readOnly />
-                </div>
-                <EmailVerifyField
-                  label="Email Address *"
-                  value={form.client_email}
-                  onChange={(val) => setForm({ ...form, client_email: val })}
-                  placeholder="client@gmail.com"
-                />
+              <div className="form-group">
+                <label>Applicant</label>
+                <input className="form-control" value={myClient ? `${myClient.client_id} - ${myClient.full_name}` : 'Loading your profile...'} readOnly />
               </div>
             ) : (
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Client *</label>
-                  <CustomSelect
-                    value={form.client_id}
-                    onChange={(val) => {
-                      const matched = clients.find((c) => String(c.id) === String(val));
-                      setForm({ ...form, client_id: val, client_email: matched?.email || '' });
-                    }}
-                    placeholder="Select client"
-                    options={clients.map((c) => ({ value: c.id, label: `${c.client_id} - ${c.full_name}` }))}
-                    style={{ width: '100%' }}
-                  />
+              <div>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${form.client_mode === 'existing' ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setForm({ ...form, client_mode: 'existing' })}
+                  >
+                    Existing Client
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${form.client_mode === 'new' ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setForm({ ...form, client_mode: 'new', client_id: '' })}
+                  >
+                    New Walk-in Client
+                  </button>
                 </div>
-                <EmailVerifyField
-                  label="Client Email Address *"
-                  value={form.client_email}
-                  onChange={(val) => setForm({ ...form, client_email: val })}
-                  placeholder="client@gmail.com"
-                />
+
+                {form.client_mode === 'existing' ? (
+                  <div className="form-group">
+                    <label>Client *</label>
+                    <CustomSelect
+                      value={form.client_id}
+                      onChange={(val) => setForm({ ...form, client_id: val })}
+                      placeholder="Select client"
+                      options={clients.map((c) => ({ value: c.id, label: `${c.client_id} - ${c.full_name}` }))}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                ) : (
+                  <div className="form-row-3">
+                    <div className="form-group">
+                      <label>Client Full Name *</label>
+                      <input
+                        className="form-control"
+                        placeholder="Juan Dela Cruz"
+                        value={form.new_client_name}
+                        onChange={(e) => setForm({ ...form, new_client_name: filterNameInput(e.target.value) })}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Contact Number</label>
+                      <input
+                        className="form-control"
+                        placeholder="09XXXXXXXXX"
+                        value={form.new_client_contact}
+                        onChange={(e) => setForm({ ...form, new_client_contact: filterPhoneInput(e.target.value) })}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Client Address *</label>
+                      <input
+                        className="form-control"
+                        placeholder="Barangay, Gumaca, Quezon"
+                        value={form.new_client_address}
+                        onChange={(e) => setForm({ ...form, new_client_address: filterLocationInput(e.target.value) })}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             )}
             <div className="form-group">
@@ -755,7 +887,15 @@ export default function Permits() {
             <div className="card-body">
               <div className="form-group">
                 <label>Selected Client</label>
-                <p>{selectedClient ? `${selectedClient.client_id} - ${selectedClient.full_name}` : (myClient ? `${myClient.client_id} - ${myClient.full_name}` : 'No client selected')}</p>
+                <p>
+                  {selectedClient
+                    ? `${selectedClient.client_id} - ${selectedClient.full_name}`
+                    : form.client_mode === 'new' && form.new_client_name
+                      ? `${form.new_client_name} (New Walk-in Client)`
+                      : myClient
+                        ? `${myClient.client_id} - ${myClient.full_name}`
+                        : 'No client selected'}
+                </p>
               </div>
               <div className="form-group"><label>Permit Type</label><p>{PERMIT_TYPES[form.permit_type]}</p></div>
               <div className="form-group"><label>Project Location</label><p>{form.project_location || '-'}</p></div>
@@ -822,151 +962,208 @@ export default function Permits() {
               </div>
             )}
 
-            <div className="form-row" style={{ alignItems: 'start', marginBottom: 16 }}>
-              <div>
-                <div className="card">
-                  <div className="card-header"><h3>Application Details</h3></div>
-                  <div className="card-body">
-                    <div className="doc-field"><span className="label">Application No.</span><span>{selectedPermit.application_no}</span></div>
-                    <div className="doc-field"><span className="label">Client</span><span>{selectedPermit.client_name}</span></div>
-                    <div className="doc-field"><span className="label">Client Email</span><span>{selectedPermit.client_email || '-'}</span></div>
-                    <div className="doc-field"><span className="label">Permit Type</span><span>{PERMIT_TYPES[selectedPermit.permit_type]}</span></div>
-                    <div className="doc-field"><span className="label">Application Date</span><span>{formatDate(selectedPermit.application_date)}</span></div>
-                    {selectedPermit.permit_type === 'electrical' && selectedPermit.electrical_subtype && (
-                      <div className="doc-field">
-                        <span className="label">Electrical Type</span>
-                        <span>{ELECTRICAL_SUBTYPES[selectedPermit.electrical_subtype] || selectedPermit.electrical_subtype}</span>
-                      </div>
-                    )}
-                    <div className="doc-field"><span className="label">Project Location</span><span>{selectedPermit.project_location || '-'}</span></div>
-                    <div className="doc-field"><span className="label">Assigned Staff</span><span>{selectedPermit.assigned_staff_name || '-'}</span></div>
-                    <div className="doc-field"><span className="label">Status</span><span><span className={`badge badge-${selectedPermit.status}`}>{STATUS_LABELS[selectedPermit.status] || selectedPermit.status}</span></span></div>
-                    <div className="doc-field"><span className="label">Total Fee</span><span>{formatCurrency(selectedPermit.total_fee)}</span></div>
-                    <div className="doc-field"><span className="label">Amount Paid</span><span>{formatCurrency(selectedPermit.amount_paid)}</span></div>
-                    {selectedPermit.approved_by_name && (
-                      <div className="doc-field"><span className="label">Approved By</span><span>{selectedPermit.approved_by_name}</span></div>
-                    )}
-                    {selectedPermit.approved_at && (
-                      <div className="doc-field"><span className="label">Approved At</span><span>{formatDateTime(selectedPermit.approved_at)}</span></div>
-                    )}
-                  </div>
-                </div>
+            <div className="permit-modal-layout">
+              <div className="permit-modal-tabs" role="tablist" aria-label="Application Sections">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={viewTab === 'details'}
+                  className={`permit-modal-tab ${viewTab === 'details' ? 'active' : ''}`}
+                  onClick={() => setViewTab('details')}
+                >
+                  Application Details
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={viewTab === 'status'}
+                  className={`permit-modal-tab ${viewTab === 'status' ? 'active' : ''}`}
+                  onClick={() => setViewTab('status')}
+                >
+                  Status &amp; History
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={viewTab === 'requirements'}
+                  className={`permit-modal-tab ${viewTab === 'requirements' ? 'active' : ''}`}
+                  onClick={() => setViewTab('requirements')}
+                >
+                  Requirements ({selectedPermit.requirements?.length || 0})
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={viewTab === 'documents'}
+                  className={`permit-modal-tab ${viewTab === 'documents' ? 'active' : ''}`}
+                  onClick={() => setViewTab('documents')}
+                >
+                  Documents (PDF) ({selectedPermit.documents?.length || 0})
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={viewTab === 'payments'}
+                  className={`permit-modal-tab ${viewTab === 'payments' ? 'active' : ''}`}
+                  onClick={() => setViewTab('payments')}
+                >
+                  Payments ({selectedPermit.payments?.length || 0})
+                </button>
               </div>
 
-              <div>
-                <div className="card" style={{ marginBottom: 16 }}>
-                  <div className="card-header"><h3>Application Status</h3></div>
-                  <div className="card-body">
-                    {selectedPermit.status === 'rejected' ? (
-                      <div className="status-step current">
-                        <div className="status-dot" />
-                        <div>
-                          <strong>Rejected</strong>
-                          <div style={{ fontSize: 12, color: 'var(--red-800)' }}>{selectedPermit.rejection_reason || 'No remarks'}</div>
+              <div className="permit-modal-content">
+                {viewTab === 'details' && (
+                  <div className="card">
+                    <div className="card-header"><h3>Application Details</h3></div>
+                    <div className="card-body">
+                      <div className="doc-field"><span className="label">Application No.</span><span>{selectedPermit.application_no}</span></div>
+                      <div className="doc-field"><span className="label">Client</span><span>{selectedPermit.client_name}</span></div>
+                      <div className="doc-field"><span className="label">Permit Type</span><span>{PERMIT_TYPES[selectedPermit.permit_type]}</span></div>
+                      <div className="doc-field"><span className="label">Application Date</span><span>{formatDate(selectedPermit.application_date)}</span></div>
+                      {selectedPermit.permit_type === 'electrical' && selectedPermit.electrical_subtype && (
+                        <div className="doc-field">
+                          <span className="label">Electrical Type</span>
+                          <span>{ELECTRICAL_SUBTYPES[selectedPermit.electrical_subtype] || selectedPermit.electrical_subtype}</span>
                         </div>
-                      </div>
-                    ) : (
-                      <div className="status-tracker">
-                        {STATUS_FLOW.map((s, index) => {
-                          const currentIndex = currentStatusIndex >= 0 ? currentStatusIndex : 0;
-                          const stateClass = index < currentIndex ? 'done' : index === currentIndex ? 'current' : '';
-                          return (
-                            <div key={s}>
-                              <div className={`status-step ${stateClass}`}>
-                                <div className="status-dot" />
-                                <div>
-                                  <strong>{STATUS_LABELS[s]}</strong>
-                                  <div style={{ fontSize: 12, color: 'var(--green-800)' }}>
-                                    {index <= currentIndex ? 'Reached' : 'Pending'}
-                                  </div>
-                                </div>
-                              </div>
-                              {index < STATUS_FLOW.length - 1 && <div className="status-line" />}
+                      )}
+                      <div className="doc-field"><span className="label">Project Location</span><span>{selectedPermit.project_location || '-'}</span></div>
+                      <div className="doc-field"><span className="label">Assigned Staff</span><span>{selectedPermit.assigned_staff_name || '-'}</span></div>
+                      <div className="doc-field"><span className="label">Status</span><span><span className={`badge badge-${selectedPermit.status}`}>{STATUS_LABELS[selectedPermit.status] || selectedPermit.status}</span></span></div>
+                      <div className="doc-field"><span className="label">Total Fee</span><span>{formatCurrency(selectedPermit.total_fee)}</span></div>
+                      <div className="doc-field"><span className="label">Amount Paid</span><span>{formatCurrency(selectedPermit.amount_paid)}</span></div>
+                      {selectedPermit.approved_by_name && (
+                        <div className="doc-field"><span className="label">Approved By</span><span>{selectedPermit.approved_by_name}</span></div>
+                      )}
+                      {selectedPermit.approved_at && (
+                        <div className="doc-field"><span className="label">Approved At</span><span>{formatDateTime(selectedPermit.approved_at)}</span></div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {viewTab === 'status' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    <div className="card">
+                      <div className="card-header"><h3>Application Status</h3></div>
+                      <div className="card-body">
+                        {selectedPermit.status === 'rejected' ? (
+                          <div className="status-step current">
+                            <div className="status-dot" />
+                            <div>
+                              <strong>Rejected</strong>
+                              <div style={{ fontSize: 12, color: 'var(--red-800)' }}>{selectedPermit.rejection_reason || 'No remarks'}</div>
                             </div>
-                          );
-                        })}
+                          </div>
+                        ) : (
+                          <div className="status-tracker">
+                            {STATUS_FLOW.map((s, index) => {
+                              const currentIndex = currentStatusIndex >= 0 ? currentStatusIndex : 0;
+                              const stateClass = index < currentIndex ? 'done' : index === currentIndex ? 'current' : '';
+                              return (
+                                <div key={s}>
+                                  <div className={`status-step ${stateClass}`}>
+                                    <div className="status-dot" />
+                                    <div>
+                                      <strong>{STATUS_LABELS[s]}</strong>
+                                      <div style={{ fontSize: 12, color: 'var(--green-800)' }}>
+                                        {index <= currentIndex ? 'Reached' : 'Pending'}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  {index < STATUS_FLOW.length - 1 && <div className="status-line" />}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                </div>
+                    </div>
 
-                <div className="card" style={{ marginBottom: 16 }}>
-                  <div className="card-header"><h3>Approval History</h3></div>
-                  <div className="card-body">
-                    {selectedPermit.approvals?.length ? selectedPermit.approvals.map((approval) => (
-                      <div key={approval.id} className="approval-record">
-                        <div>
-                          <span className={`badge badge-${approval.decision === 'approved' ? 'approved' : 'rejected'}`}>
-                            {approval.decision === 'approved' ? 'Approved' : 'Rejected'}
-                          </span>
-                          <strong style={{ marginLeft: 8 }}>{approval.engineer_name || 'Municipal Engineer'}</strong>
-                        </div>
-                        <div className="doc-meta">{formatDateTime(approval.created_at)}</div>
-                        {approval.remarks && <div className="approval-remarks">{approval.remarks}</div>}
+                    <div className="card">
+                      <div className="card-header"><h3>Approval History</h3></div>
+                      <div className="card-body">
+                        {selectedPermit.approvals?.length ? selectedPermit.approvals.map((approval) => (
+                          <div key={approval.id} className="approval-record">
+                            <div>
+                              <span className={`badge badge-${approval.decision === 'approved' ? 'approved' : 'rejected'}`}>
+                                {approval.decision === 'approved' ? 'Approved' : 'Rejected'}
+                              </span>
+                              <strong style={{ marginLeft: 8 }}>{approval.engineer_name || 'Municipal Engineer'}</strong>
+                            </div>
+                            <div className="doc-meta">{formatDateTime(approval.created_at)}</div>
+                            {approval.remarks && <div className="approval-remarks">{approval.remarks}</div>}
+                          </div>
+                        )) : <p className="page-subtitle">No engineer decision recorded yet.</p>}
                       </div>
-                    )) : <p className="page-subtitle">No engineer decision recorded yet.</p>}
+                    </div>
                   </div>
-                </div>
+                )}
 
-                <div className="card">
-                  <div className="card-header"><h3>Payments</h3></div>
-                  <div className="card-body">
-                    {selectedPermit.payments?.length ? selectedPermit.payments.map((payment) => (
-                      <div key={payment.id} className="payment-record">
-                        <div>
-                          <strong>{payment.or_number}</strong>
-                          <div className="doc-meta">{formatDateTime(payment.payment_date)} · {payment.cashier_name || '-'}</div>
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <strong>{formatCurrency(payment.amount)}</strong>
-                          <button className="btn-icon" title="View / Print Receipt" onClick={() => openReceipt(payment.id)}>
-                            <Icon name="print" size={16} />
-                          </button>
-                        </div>
-                      </div>
-                    )) : <p className="page-subtitle">No payment recorded yet.</p>}
+                {viewTab === 'requirements' && (
+                  <div className="card">
+                    <div className="card-header"><h3>Requirements Checklist</h3></div>
+                    <div className="table-wrap mobile-card-table">
+                      <table>
+                        <thead><tr><th>Requirement</th><th style={{ width: 120 }}>Status</th><th style={{ width: 150 }}>Action</th></tr></thead>
+                        <tbody>
+                          {selectedPermit.requirements?.map((r) => (
+                            <tr key={r.id}>
+                              <td className="mobile-full" data-label="Requirement">{r.requirement_name}</td>
+                              <td data-label="Status"><span className={`badge badge-${r.status}`}>{r.status}</span></td>
+                              <td data-label="Action">
+                                {canReviewDocuments ? (
+                                  <CustomSelect
+                                    value={r.status}
+                                    onChange={(val) => handleRequirementToggle(selectedPermit.id, r.id, val)}
+                                    options={[
+                                      { value: 'pending', label: 'Pending' },
+                                      { value: 'submitted', label: 'Submitted' },
+                                    ]}
+                                    style={{ minWidth: 135 }}
+                                  />
+                                ) : (
+                                  <span>{r.status === 'submitted' ? 'Submitted' : 'Pending'}</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                </div>
+                )}
+
+                {viewTab === 'documents' && (
+                  <DocumentsPanel
+                    permit={selectedPermit}
+                    user={user}
+                    onChanged={() => refreshSelected()}
+                  />
+                )}
+
+                {viewTab === 'payments' && (
+                  <div className="card">
+                    <div className="card-header"><h3>Payments</h3></div>
+                    <div className="card-body">
+                      {selectedPermit.payments?.length ? selectedPermit.payments.map((payment) => (
+                        <div key={payment.id} className="payment-record">
+                          <div>
+                            <strong>{payment.or_number}</strong>
+                            <div className="doc-meta">{formatDateTime(payment.payment_date)} · {payment.cashier_name || '-'}</div>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <strong>{formatCurrency(payment.amount)}</strong>
+                            <button type="button" className="btn btn-secondary btn-sm" onClick={() => openReceipt(payment.id)}>
+                              Receipt
+                            </button>
+                          </div>
+                        </div>
+                      )) : <p className="page-subtitle">No payment recorded yet.</p>}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
-
-            <div className="card" style={{ marginBottom: 16 }}>
-              <div className="card-header"><h3>Requirements Checklist</h3></div>
-              <div className="table-wrap mobile-card-table">
-                <table>
-                  <thead><tr><th>Requirement</th><th style={{ width: 120 }}>Status</th><th style={{ width: 150 }}>Action</th></tr></thead>
-                  <tbody>
-                    {selectedPermit.requirements?.map((r) => (
-                      <tr key={r.id}>
-                        <td className="mobile-full" data-label="Requirement">{r.requirement_name}</td>
-                        <td data-label="Status"><span className={`badge badge-${r.status}`}>{r.status}</span></td>
-                        <td data-label="Action">
-                          {canReviewDocuments ? (
-                            <CustomSelect
-                              value={r.status}
-                              onChange={(val) => handleRequirementToggle(selectedPermit.id, r.id, val)}
-                              options={[
-                                { value: 'pending', label: 'Pending' },
-                                { value: 'submitted', label: 'Submitted' },
-                              ]}
-                              style={{ minWidth: 135 }}
-                            />
-                          ) : (
-                            <span>{r.status === 'submitted' ? 'Submitted' : 'Pending'}</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <DocumentsPanel
-              permit={selectedPermit}
-              user={user}
-              onChanged={() => refreshSelected()}
-            />
           </>
         )}
       </Modal>

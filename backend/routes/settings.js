@@ -5,7 +5,6 @@ const QRCode = require('qrcode');
 const db = require('../database/db');
 const { authenticate } = require('../middleware/auth');
 const { checkPermission, logAudit, getClientIp } = require('../middleware/rbac');
-const { sendTestEmail, getSmtpConfig } = require('../utils/mailer');
 
 const router = express.Router();
 const dbPath = process.env.DB_PATH
@@ -31,13 +30,6 @@ router.put('/office', authenticate, checkPermission('settings'), (req, res) => {
 router.get('/system', authenticate, checkPermission('settings'), (req, res) => {
   const rows = db.prepare('SELECT key, value FROM settings').all();
   const data = Object.fromEntries(rows.map((r) => [r.key, r.value]));
-  const smtp = getSmtpConfig();
-  if (!data.smtp_host && smtp.host) data.smtp_host = smtp.host;
-  if (!data.smtp_user && smtp.user) data.smtp_user = smtp.user;
-  if (!data.smtp_pass && smtp.pass) data.smtp_pass = smtp.pass;
-  if (!data.smtp_from && smtp.from) data.smtp_from = smtp.from;
-  if ((!data.smtp_port || data.smtp_port === '587') && smtp.port) data.smtp_port = String(smtp.port);
-  if (data.smtp_secure === undefined || data.smtp_secure === '') data.smtp_secure = String(smtp.secure);
   res.json(data);
 });
 
@@ -97,17 +89,6 @@ router.post('/restore', authenticate, checkPermission('settings'), (req, res) =>
   fs.copyFileSync(src, dbPath);
   logAudit(req.user.id, req.user.username, req.user.role, `Database restored from: ${filename}`, getClientIp(req));
   res.json({ success: true, message: 'Database restored. Please restart the server.' });
-});
-
-router.post('/test-email', authenticate, checkPermission('settings'), async (req, res) => {
-  const { to } = req.body || {};
-  try {
-    const result = await sendTestEmail(to);
-    logAudit(req.user.id, req.user.username, req.user.role, `Sent test email to ${result.to}`, getClientIp(req));
-    res.json({ success: true, message: `Test email sent to ${result.to}.` });
-  } catch (err) {
-    res.status(400).json({ error: err.message || 'Failed to send test email' });
-  }
 });
 
 router.get('/permit/:id/preview', authenticate, checkPermission('permits'), async (req, res) => {

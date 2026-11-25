@@ -1,43 +1,78 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
-import { Icon, formatCurrency, formatDateTime, PERMIT_TYPES, STATUS_LABELS } from '../components/UI';
+import { Icon, formatCurrency, formatDateTime, timeAgo, PERMIT_TYPES, STATUS_LABELS, DOCUMENT_STATUS_LABELS } from '../components/UI';
 
 const PIE_COLORS = ['#7f1d1d', '#b91c1c', '#dc2626', '#ef4444', '#f87171', '#fee2e2'];
 
 export default function Dashboard() {
-  const { user } = useAuth();
+  const { user, hasAccess } = useAuth();
+  const navigate = useNavigate();
   const isClient = user?.role === 'viewer';
   const [stats, setStats] = useState(null);
   const [monthly, setMonthly] = useState([]);
   const [distribution, setDistribution] = useState([]);
   const [weekly, setWeekly] = useState([]);
   const [activities, setActivities] = useState([]);
+  const [engineerRemarks, setEngineerRemarks] = useState([]);
+  const [liveToast, setLiveToast] = useState(null);
   const [loading, setLoading] = useState(true);
+  const toastTimerRef = useRef(null);
+
+  const loadDashboard = useCallback(() => {
+    Promise.all([
+      api.getDashboardStats(),
+      api.getMonthlyPermits(),
+      api.getStatusDistribution(),
+      api.getWeeklyTransactions(),
+      api.getRecentActivities(),
+      api.getEngineerRemarks(),
+    ]).then(([s, m, d, w, a, r]) => {
+      setStats(s);
+      setMonthly(m.map((x) => ({ ...x, label: x.month?.slice(5) || x.month })));
+      setDistribution(d.map((x) => ({ name: STATUS_LABELS[x.status] || x.status, value: x.count })));
+      setWeekly(w.map((x) => ({ ...x, label: x.day?.slice(5) || x.day })));
+      setActivities(a);
+      setEngineerRemarks(r || []);
+    }).finally(() => setLoading(false));
+  }, []);
 
   useEffect(() => {
-    let active = true;
-    const loadDashboard = (initial = false) => {
-      Promise.all([
-        api.getDashboardStats(),
-        api.getMonthlyPermits(),
-        api.getStatusDistribution(),
-        api.getWeeklyTransactions(),
-        api.getRecentActivities(),
-      ]).then(([s, m, d, w, a]) => {
-        if (!active) return;
-        setStats(s);
-        setMonthly(m.map((x) => ({ ...x, label: x.month?.slice(5) || x.month })));
-        setDistribution(d.map((x) => ({ name: STATUS_LABELS[x.status] || x.status, value: x.count })));
-        setWeekly(w.map((x) => ({ ...x, label: x.day?.slice(5) || x.day })));
-        setActivities(a);
-      }).finally(() => { if (active) setLoading(false); });
+    loadDashboard();
+
+    let es;
+    try {
+      es = new EventSource(api.getNotificationStreamUrl());
+      es.addEventListener('update', (evt) => {
+        loadDashboard();
+        try {
+          const parsed = JSON.parse(evt.data);
+          if (parsed?.payload?.title) {
+            setLiveToast({
+              title: parsed.payload.title,
+              message: parsed.payload.message,
+              permitId: parsed.payload.permitId,
+            });
+            clearTimeout(toastTimerRef.current);
+            toastTimerRef.current = setTimeout(() => setLiveToast(null), 8000);
+          }
+        } catch {
+          /* ignore */
+        }
+      });
+    } catch {
+      /* fallback to polling */
+    }
+
+    const timer = setInterval(loadDashboard, 5000);
+    return () => {
+      clearInterval(timer);
+      clearTimeout(toastTimerRef.current);
+      if (es) es.close();
     };
-    loadDashboard(true);
-    const timer = setInterval(() => loadDashboard(false), 30000);
-    return () => { active = false; clearInterval(timer); };
-  }, []);
+  }, [loadDashboard]);
 
   if (loading || !stats) return <div className="loading">Loading dashboard...</div>;
 
@@ -57,14 +92,66 @@ export default function Dashboard() {
     queueMessage = `${stats.forApproval} for engineer approval · ${stats.awaitingPayment} awaiting payment`;
   }
 
+  const canAddPermit = hasAccess('permits');
+  const canAddClient = hasAccess('clients') && ['admin', 'engineering_staff', 'municipal_engineer'].includes(user?.role);
+
   return (
     <div>
-      <div className="page-header-row">
+      <div className="page-header-row" style={{ flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <p className="page-subtitle">Manage and track municipal engineering permits & records</p>
+          <p className="page-subtitle">Manage and track municipal engineering permits &amp; records</p>
           <h1 className="page-title">Dashboard</h1>
         </div>
+        {(canAddPermit || canAddClient) && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            {canAddClient && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => navigate('/clients?action=new')}
+              >
+                <Icon name="plus" size={16} /> Add New Client
+              </button>
+            )}
+            {canAddPermit && (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => navigate('/permits?action=new')}
+              >
+                <Icon name="plus" size={16} /> New Permit Application
+              </button>
+            )}
+          </div>
+        )}
       </div>
+
+      {liveToast && (
+        <div
+          className="dashboard-queue-banner"
+          style={{
+            background: '#fef2f2',
+            borderColor: '#dc2626',
+            justifyContent: 'space-between',
+            cursor: liveToast.permitId ? 'pointer' : 'default',
+          }}
+          onClick={() => {
+            if (liveToast.permitId) navigate(`/permits?open=${liveToast.permitId}`);
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Icon name="bell" size={16} />
+            <span><strong>{liveToast.title}:</strong> {liveToast.message}</span>
+          </div>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={(e) => { e.stopPropagation(); setLiveToast(null); }}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {queueMessage && (
         <div className="dashboard-queue-banner">
@@ -86,13 +173,67 @@ export default function Dashboard() {
         ))}
       </div>
 
+      {/* Real-Time Engineer Remarks & Notifications Feed */}
+      <div className="card" style={{ marginBottom: 24 }}>
+        <div className="card-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <h3>Engineer Remarks &amp; Real-Time Updates</h3>
+            <span className="live-pill">
+              <span className="live-dot" /> Live
+            </span>
+          </div>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={loadDashboard}>
+            Refresh
+          </button>
+        </div>
+        <div className="card-body" style={{ padding: 0 }}>
+          {engineerRemarks.length === 0 ? (
+            <div className="empty-state" style={{ padding: 20 }}>No engineer remarks yet.</div>
+          ) : (
+            <div className="remarks-feed">
+              {engineerRemarks.map((item) => (
+                <div
+                  key={`${item.source}-${item.id}`}
+                  className="remarks-feed-item"
+                  onClick={() => navigate(`/permits?open=${item.permit_id}`)}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <div className="remarks-feed-top">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <strong>{item.application_no}</strong>
+                      <span>&mdash; {item.client_name}</span>
+                      <span className={`badge badge-${item.status}`}>
+                        {DOCUMENT_STATUS_LABELS[item.status] || STATUS_LABELS[item.status] || item.status}
+                      </span>
+                      {item.source === 'document' && item.document_type && (
+                        <span className="doc-meta">({item.document_type})</span>
+                      )}
+                    </div>
+                    <span className="doc-meta">{timeAgo(item.created_at)}</span>
+                  </div>
+                  <div className="remarks-feed-body">
+                    {item.remarks ? (
+                      <span>&ldquo;{item.remarks}&rdquo;</span>
+                    ) : (
+                      <span style={{ color: 'var(--text-light)' }}>No remarks text</span>
+                    )}
+                    {item.engineer_name && (
+                      <span className="doc-meta" style={{ marginLeft: 8 }}>&mdash; {item.engineer_name}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* 2-Column Financial Summary Cards (staff roles only) */}
       {!isClient && (
       <div className="chart-grid-2">
         <div className="card">
           <div className="card-header">
-            <h3>Today's Transactions</h3>
-            <button className="card-action-btn" title="View Details"><Icon name="payments" size={16} /></button>
+            <h3>Today&apos;s Transactions</h3>
           </div>
           <div className="card-body">
             <div className="stat-card" style={{ border: 'none', boxShadow: 'none', padding: 0 }}>
@@ -105,7 +246,6 @@ export default function Dashboard() {
         <div className="card">
           <div className="card-header">
             <h3>Monthly Revenue</h3>
-            <button className="card-action-btn" title="Revenue Overview"><Icon name="reports" size={16} /></button>
           </div>
           <div className="card-body">
             <div className="value" style={{ fontSize: 32, color: 'var(--primary)' }}>{formatCurrency(stats.monthlyRevenue)}</div>
@@ -120,7 +260,6 @@ export default function Dashboard() {
         <div className="card">
           <div className="card-header">
             <h3>Monthly Permit Applications</h3>
-            <button className="card-action-btn" title="Monthly Trend"><Icon name="permits" size={16} /></button>
           </div>
           <div className="card-body" style={{ height: 300 }}>
             {monthly.length > 0 ? (
@@ -140,7 +279,6 @@ export default function Dashboard() {
         <div className="card">
           <div className="card-header">
             <h3>Permit Status Overview</h3>
-            <button className="card-action-btn" title="Distribution"><Icon name="shield" size={16} /></button>
           </div>
           <div className="card-body" style={{ height: 300 }}>
             {distribution.length > 0 ? (
@@ -160,8 +298,7 @@ export default function Dashboard() {
       {/* 100% Full Width Income Curve */}
       <div className="card" style={{ marginBottom: 24 }}>
         <div className="card-header">
-          <h3>Weekly Income & Payment Transactions</h3>
-          <button className="card-action-btn" title="Weekly Curve"><Icon name="payments" size={16} /></button>
+          <h3>Weekly Income &amp; Payment Transactions</h3>
         </div>
         <div className="card-body" style={{ height: 300 }}>
           {weekly.length > 0 ? (
@@ -182,7 +319,7 @@ export default function Dashboard() {
       <div className="card">
         <div className="card-header">
           <h3>Recent System Activities</h3>
-          <button className="card-action-btn" title="Refresh List"><Icon name="audit" size={16} /></button>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={loadDashboard}>Refresh</button>
         </div>
         <div className="table-wrap">
           <table>

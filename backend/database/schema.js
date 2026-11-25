@@ -61,6 +61,9 @@ const SCHEMA_SQL = `
     rejected_at DATETIME,
     rejection_reason TEXT,
     payment_date DATETIME,
+    is_archived INTEGER NOT NULL DEFAULT 0,
+    archived_at DATETIME,
+    archived_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
@@ -87,6 +90,9 @@ const SCHEMA_SQL = `
     status TEXT NOT NULL DEFAULT 'pending_review'
       CHECK(status IN ('pending_review', 'accepted', 'rejected', 'requires_resubmission')),
     remarks TEXT,
+    is_archived INTEGER NOT NULL DEFAULT 0,
+    archived_at DATETIME,
+    archived_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
     uploaded_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
     reviewed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
     reviewed_at DATETIME,
@@ -228,6 +234,9 @@ const ADDITIVE_COLUMNS = {
     rejected_at: 'DATETIME',
     rejection_reason: 'TEXT',
     payment_date: 'DATETIME',
+    is_archived: 'INTEGER DEFAULT 0',
+    archived_at: 'DATETIME',
+    archived_by: 'INTEGER REFERENCES users(id)',
     created_at: 'DATETIME',
     updated_at: 'DATETIME',
   },
@@ -257,6 +266,9 @@ const ADDITIVE_COLUMNS = {
     file_size: 'INTEGER DEFAULT 0',
     status: "TEXT DEFAULT 'pending_review'",
     remarks: 'TEXT',
+    is_archived: 'INTEGER DEFAULT 0',
+    archived_at: 'DATETIME',
+    archived_by: 'INTEGER REFERENCES users(id)',
     uploaded_by: 'INTEGER REFERENCES users(id)',
     reviewed_by: 'INTEGER REFERENCES users(id)',
     reviewed_at: 'DATETIME',
@@ -460,6 +472,9 @@ const PERMITS_MIGRATION_SQL = `
     rejected_at DATETIME,
     rejection_reason TEXT,
     payment_date DATETIME,
+    is_archived INTEGER NOT NULL DEFAULT 0,
+    archived_at DATETIME,
+    archived_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )

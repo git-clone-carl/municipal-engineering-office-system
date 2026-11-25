@@ -93,9 +93,9 @@ export default function Users() {
                     <td>{u.username}</td>
                     <td>{ROLE_LABELS[u.role]}</td>
                     <td><span className={`badge badge-${u.status}`}>{u.status}</span></td>
-                    <td style={{ display: 'flex', gap: 4 }}>
-                      <button className="btn-icon" onClick={() => openEdit(u)}><Icon name="edit" size={16} /></button>
-                      <button className="btn-icon danger" onClick={() => handleDelete(u.id)}><Icon name="delete" size={16} /></button>
+                    <td style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => openEdit(u)}>Edit</button>
+                      <button type="button" className="btn btn-danger btn-sm" onClick={() => handleDelete(u.id)}>Delete</button>
                     </td>
                   </tr>
                 ))}

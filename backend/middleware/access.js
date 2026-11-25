@@ -1,4 +1,5 @@
 const db = require('../database/db');
+const { emitRealtimeEvent } = require('../utils/events');
 
 /**
  * Shared authorization / ownership helpers.
@@ -71,6 +72,7 @@ function notifyUser(userId, title, message, type = 'info', permitId = null) {
     INSERT INTO notifications (user_id, permit_id, title, message, type)
     VALUES (?, ?, ?, ?, ?)
   `).run(userId, permitId, title, message, type);
+  emitRealtimeEvent('notification', { userId, title, message, type, permitId });
 }
 
 function notifyRole(roles, title, message, type = 'info', permitId = null) {
@@ -79,6 +81,7 @@ function notifyRole(roles, title, message, type = 'info', permitId = null) {
     INSERT INTO notifications (user_id, permit_id, title, message, type)
     SELECT id, ?, ?, ?, ? FROM users WHERE role IN (${placeholders}) AND status = 'active'
   `).run(permitId, title, message, type, ...roles);
+  emitRealtimeEvent('notification', { roles, title, message, type, permitId });
 }
 
 function notifyClient(permitId, title, message, type = 'info') {

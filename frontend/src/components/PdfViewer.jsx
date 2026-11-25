@@ -82,17 +82,17 @@ export default function PdfViewer({ document, canDownload = true, onClose }) {
           <span className="pdf-doc-type">{document.document_type}</span>
         </div>
         <div className="pdf-toolbar-actions">
-          <button type="button" className="btn-icon" onClick={() => setZoom((z) => Math.max(50, z - 25))} title="Zoom out">
-            <Icon name="zoomOut" size={16} />
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => setZoom((z) => Math.max(50, z - 25))}>
+            Zoom Out
           </button>
           <span className="pdf-zoom-value">{zoom}%</span>
-          <button type="button" className="btn-icon" onClick={() => setZoom((z) => Math.min(300, z + 25))} title="Zoom in">
-            <Icon name="zoomIn" size={16} />
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => setZoom((z) => Math.min(300, z + 25))}>
+            Zoom In
           </button>
           <button type="button" className="btn btn-secondary btn-sm" onClick={() => setZoom(100)}>Reset</button>
           <button type="button" className="btn btn-secondary btn-sm" onClick={openInNewTab} disabled={!url}>Open Tab</button>
-          <button type="button" className="btn-icon" onClick={fullscreen} title="Fullscreen">
-            <Icon name="fullscreen" size={16} />
+          <button type="button" className="btn btn-secondary btn-sm" onClick={fullscreen}>
+            Fullscreen
           </button>
           {canDownload && (
             <button type="button" className="btn btn-secondary btn-sm" onClick={download} disabled={downloading}>

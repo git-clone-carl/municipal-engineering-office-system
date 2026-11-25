@@ -10,6 +10,7 @@ const UPLOADABLE_PERMIT_STATUSES = ['submitted', 'for_review', 'for_approval', '
 
 export default function DocumentsPanel({ permit, user, onChanged }) {
   const [documents, setDocuments] = useState([]);
+  const [docTab, setDocTab] = useState('active');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -153,6 +154,34 @@ export default function DocumentsPanel({ permit, user, onChanged }) {
     }
   };
 
+  const handleArchive = async (doc) => {
+    resetMessages();
+    try {
+      await api.archiveDocument(doc.id);
+      setSuccess(`Archived "${doc.original_name}".`);
+      await load();
+      onChanged?.();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handleRestore = async (doc) => {
+    resetMessages();
+    try {
+      await api.restoreDocument(doc.id);
+      setSuccess(`Restored "${doc.original_name}".`);
+      await load();
+      onChanged?.();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const activeDocs = documents.filter((d) => !d.is_archived);
+  const archivedDocs = documents.filter((d) => d.is_archived);
+  const visibleDocs = docTab === 'archived' ? archivedDocs : activeDocs;
+
   const requirementOptions = [
     { value: '', label: 'Other / Supporting document' },
     ...(permit?.requirements || []).map((r) => ({ value: String(r.id), label: r.requirement_name })),
@@ -160,8 +189,26 @@ export default function DocumentsPanel({ permit, user, onChanged }) {
 
   return (
     <div className="card documents-panel">
-      <div className="card-header">
-        <h3>Application Documents (PDF)</h3>
+      <div className="card-header" style={{ flexWrap: 'wrap', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <h3>Application Documents (PDF)</h3>
+          <div className="tabs" style={{ marginBottom: 0 }}>
+            <button
+              type="button"
+              className={`tab ${docTab === 'active' ? 'active' : ''}`}
+              onClick={() => setDocTab('active')}
+            >
+              Active Files ({activeDocs.length})
+            </button>
+            <button
+              type="button"
+              className={`tab ${docTab === 'archived' ? 'active' : ''}`}
+              onClick={() => setDocTab('archived')}
+            >
+              Archived ({archivedDocs.length})
+            </button>
+          </div>
+        </div>
         {canUpload && (
           <button type="button" className="btn btn-secondary btn-sm" onClick={openUpload}>
             <Icon name="upload" size={14} /> Upload PDF
@@ -186,9 +233,13 @@ export default function DocumentsPanel({ permit, user, onChanged }) {
               </tr>
             </thead>
             <tbody>
-              {documents.length === 0 ? (
-                <tr><td colSpan={6} className="empty-state">No PDF documents uploaded yet.</td></tr>
-              ) : documents.map((doc) => (
+              {visibleDocs.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="empty-state">
+                    {docTab === 'archived' ? 'No archived PDF documents.' : 'No PDF documents uploaded yet.'}
+                  </td>
+                </tr>
+              ) : visibleDocs.map((doc) => (
                 <tr key={doc.id}>
                   <td className="mobile-full" data-label="Document">
                     <div className="doc-name-cell">
@@ -209,23 +260,33 @@ export default function DocumentsPanel({ permit, user, onChanged }) {
                     {doc.reviewed_by_name && <div className="doc-meta">by {doc.reviewed_by_name}</div>}
                   </td>
                   <td data-label="Actions">
-                    <div className="table-actions">
-                      <button type="button" className="btn-icon" title="View PDF" onClick={() => setViewTarget(doc)}>
-                        <Icon name="view" size={16} />
+                    <div className="table-actions" style={{ flexWrap: 'wrap', gap: 6 }}>
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => setViewTarget(doc)}>
+                        View
                       </button>
                       {canDownload && (
-                        <button type="button" className="btn-icon" title="Download PDF" onClick={() => download(doc)}>
-                          <Icon name="download" size={16} />
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => download(doc)}>
+                          Download
                         </button>
                       )}
-                      {canUpload && doc.status !== 'accepted' && (
-                        <button type="button" className="btn-icon" title="Replace PDF" onClick={() => openReplace(doc)}>
-                          <Icon name="refresh" size={16} />
+                      {!doc.is_archived && canUpload && doc.status !== 'accepted' && (
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => openReplace(doc)}>
+                          Replace File
                         </button>
                       )}
-                      {canReview && (
-                        <button type="button" className="btn-icon" title="Review document" onClick={() => openReview(doc)}>
-                          <Icon name="check" size={16} />
+                      {!doc.is_archived && canReview && (
+                        <button type="button" className="btn btn-primary btn-sm" onClick={() => openReview(doc)}>
+                          Review
+                        </button>
+                      )}
+                      {canReview && !doc.is_archived && (
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleArchive(doc)}>
+                          Archive
+                        </button>
+                      )}
+                      {canReview && doc.is_archived && (
+                        <button type="button" className="btn btn-success btn-sm" onClick={() => handleRestore(doc)}>
+                          Restore
                         </button>
                       )}
                     </div>

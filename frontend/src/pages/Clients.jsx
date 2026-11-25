@@ -3,11 +3,10 @@ import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { Icon, Modal, Pagination } from '../components/UI';
 
-const emptyForm = { full_name: '', contact_number: '', email: '', address: '' };
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const emptyForm = { full_name: '', contact_number: '', address: '' };
 
 export default function Clients() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [clients, setClients] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -23,7 +22,13 @@ export default function Clients() {
       setSearch(querySearch);
       setPage(1);
     }
-  }, [searchParams]);
+    if (searchParams.get('action') === 'new') {
+      setSearchParams({}, { replace: true });
+      setForm(emptyForm);
+      setError('');
+      setModal('create');
+    }
+  }, [searchParams, setSearchParams]);
 
   const load = () => {
     setLoading(true);
@@ -42,10 +47,6 @@ export default function Clients() {
     setError('');
     if (!String(form.full_name || '').trim()) {
       setError('Full Name is required.');
-      return;
-    }
-    if (!EMAIL_REGEX.test(String(form.email || '').trim())) {
-      setError('A valid Email Address is required.');
       return;
     }
     try {
@@ -85,23 +86,22 @@ export default function Clients() {
             <table>
               <thead>
                 <tr>
-                  <th>ID</th><th>Client Name</th><th>Contact</th><th>Email</th><th>Address</th><th>Actions</th>
+                  <th>ID</th><th>Client Name</th><th>Contact</th><th>Address</th><th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {clients.length === 0 ? (
-                  <tr><td colSpan={6} className="empty-state">No clients found. Add your first client.</td></tr>
+                  <tr><td colSpan={5} className="empty-state">No clients found. Add your first client.</td></tr>
                 ) : clients.map((c) => (
                   <tr key={c.id}>
                     <td>{c.client_id}</td>
                     <td>{c.full_name}</td>
                     <td>{c.contact_number || '-'}</td>
-                    <td>{c.email || '-'}</td>
                     <td>{c.address || '-'}</td>
-                    <td style={{ display: 'flex', gap: 4 }}>
-                      <button className="btn-icon" title="View" onClick={() => openView(c)}><Icon name="view" size={16} /></button>
-                      <button className="btn-icon" title="Edit" onClick={() => openEdit(c)}><Icon name="edit" size={16} /></button>
-                      <button className="btn-icon danger" title="Delete" onClick={() => handleDelete(c.id)}><Icon name="delete" size={16} /></button>
+                    <td style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => openView(c)}>View</button>
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => openEdit(c)}>Edit</button>
+                      <button type="button" className="btn btn-danger btn-sm" onClick={() => handleDelete(c.id)}>Delete</button>
                     </td>
                   </tr>
                 ))}
@@ -125,15 +125,9 @@ export default function Clients() {
           <label>Full Name *</label>
           <input className="form-control" value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />
         </div>
-        <div className="form-row">
-          <div className="form-group">
-            <label>Contact Number</label>
-            <input className="form-control" value={form.contact_number} onChange={(e) => setForm({ ...form, contact_number: e.target.value })} />
-          </div>
-          <div className="form-group">
-            <label>Email Address *</label>
-            <input className="form-control" type="email" placeholder="client@example.com" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
-          </div>
+        <div className="form-group">
+          <label>Contact Number</label>
+          <input className="form-control" value={form.contact_number} onChange={(e) => setForm({ ...form, contact_number: e.target.value })} />
         </div>
         <div className="form-group">
           <label>Address</label>
@@ -145,7 +139,6 @@ export default function Clients() {
         <div className="form-group"><label>Client ID</label><p>{form.client_id}</p></div>
         <div className="form-group"><label>Full Name</label><p>{form.full_name}</p></div>
         <div className="form-group"><label>Contact</label><p>{form.contact_number || '-'}</p></div>
-        <div className="form-group"><label>Email</label><p>{form.email || '-'}</p></div>
         <div className="form-group"><label>Address</label><p>{form.address || '-'}</p></div>
       </Modal>
     </div>

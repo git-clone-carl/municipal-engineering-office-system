@@ -104,4 +104,37 @@ router.get('/recent-activities', authenticate, checkPermission('dashboard'), (re
   res.json(activities);
 });
 
+router.get('/engineer-remarks', authenticate, checkPermission('dashboard'), (req, res) => {
+  const { sql, params } = scope(req);
+  const approvalRemarks = db.prepare(`
+    SELECT 'permit' AS source, ar.id, p.id AS permit_id, p.application_no, c.full_name AS client_name,
+           u.full_name AS engineer_name, ar.decision AS status, ar.remarks, ar.created_at
+    FROM approval_records ar
+    JOIN permits p ON ar.permit_id = p.id
+    JOIN clients c ON p.client_id = c.id
+    LEFT JOIN users u ON ar.engineer_id = u.id
+    WHERE 1=1${sql}
+    ORDER BY ar.created_at DESC, ar.id DESC LIMIT 10
+  `).all(...params);
+
+  const documentRemarks = db.prepare(`
+    SELECT 'document' AS source, d.id, p.id AS permit_id, p.application_no, c.full_name AS client_name,
+           u.full_name AS engineer_name, d.status, d.remarks,
+           COALESCE(d.reviewed_at, d.updated_at) AS created_at,
+           d.document_type, d.original_name
+    FROM application_documents d
+    JOIN permits p ON d.permit_id = p.id
+    JOIN clients c ON p.client_id = c.id
+    LEFT JOIN users u ON d.reviewed_by = u.id
+    WHERE d.remarks IS NOT NULL AND TRIM(d.remarks) != ''${sql}
+    ORDER BY COALESCE(d.reviewed_at, d.updated_at) DESC, d.id DESC LIMIT 10
+  `).all(...params);
+
+  const combined = [...approvalRemarks, ...documentRemarks]
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    .slice(0, 12);
+
+  res.json(combined);
+});
+
 module.exports = router;

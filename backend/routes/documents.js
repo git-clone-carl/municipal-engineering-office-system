@@ -46,6 +46,9 @@ function documentMetadata(doc) {
     file_size: doc.file_size,
     status: doc.status,
     remarks: doc.remarks,
+    is_archived: Boolean(doc.is_archived),
+    archived_at: doc.archived_at || null,
+    archived_by: doc.archived_by || null,
     uploaded_by: doc.uploaded_by,
     uploaded_by_name: doc.uploaded_by_name || null,
     reviewed_by: doc.reviewed_by,
@@ -223,6 +226,54 @@ router.put('/:id/status', authenticate, checkPermission('permits'),
       `${doc.document_type} ${messages[status]}${remarks ? `. Remarks: ${remarks}` : ''}`,
       status === 'accepted' ? 'success' : status === 'pending_review' ? 'info' : 'warning');
 
+    if (req.user.role === 'municipal_engineer' || remarks) {
+      notifyRole(
+        ['engineering_staff', 'admin'],
+        'Engineer Document Remarks',
+        `${req.user.full_name} marked ${doc.document_type} (${permit.application_no}) as ${status.replace(/_/g, ' ')}${remarks ? `: "${remarks}"` : ''}`,
+        status === 'accepted' ? 'success' : status === 'pending_review' ? 'info' : 'warning',
+        permit.id,
+      );
+    }
+
+    res.json({ success: true, document: documentMetadata(loadDocument(doc.id)) });
+  });
+
+router.put('/:id/archive', authenticate, checkPermission('permits'),
+  requireRole('admin', 'engineering_staff', 'municipal_engineer'), (req, res) => {
+    const doc = loadDocument(req.params.id);
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    const permit = loadPermitById(doc.permit_id);
+    if (!permit) return res.status(404).json({ error: 'Permit not found' });
+
+    db.prepare(`
+      UPDATE application_documents
+      SET is_archived = 1, archived_at = CURRENT_TIMESTAMP, archived_by = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(req.user.id, doc.id);
+
+    logAudit(req.user.id, req.user.username, req.user.role,
+      `Archived document ${doc.document_no} for ${permit.application_no}`, getClientIp(req));
+
+    res.json({ success: true, document: documentMetadata(loadDocument(doc.id)) });
+  });
+
+router.put('/:id/restore', authenticate, checkPermission('permits'),
+  requireRole('admin', 'engineering_staff', 'municipal_engineer'), (req, res) => {
+    const doc = loadDocument(req.params.id);
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    const permit = loadPermitById(doc.permit_id);
+    if (!permit) return res.status(404).json({ error: 'Permit not found' });
+
+    db.prepare(`
+      UPDATE application_documents
+      SET is_archived = 0, archived_at = NULL, archived_by = NULL, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(doc.id);
+
+    logAudit(req.user.id, req.user.username, req.user.role,
+      `Restored document ${doc.document_no} from archive for ${permit.application_no}`, getClientIp(req));
+
     res.json({ success: true, document: documentMetadata(loadDocument(doc.id)) });
   });
 
@@ -249,6 +300,31 @@ router.get('/:id/file', authenticate, (req, res) => {
   res.setHeader('Cache-Control', 'private, no-store, max-age=0');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.sendFile(filePath);
+});
+
+/** Archived PDF documents register (Admin & Municipal Engineer). */
+router.get('/archived', authenticate, requireRole('admin', 'municipal_engineer'), (req, res) => {
+  const { search = '' } = req.query;
+  let where = 'COALESCE(d.is_archived, 0) = 1';
+  const params = [];
+  if (search) {
+    where += ' AND (d.document_no LIKE ? OR d.original_name LIKE ? OR p.application_no LIKE ? OR c.full_name LIKE ?)';
+    const s = `%${search}%`;
+    params.push(s, s, s, s);
+  }
+  const documents = db.prepare(`
+    SELECT d.id, d.document_no, d.permit_id, d.document_type, d.original_name, d.status, d.file_size,
+           d.uploaded_at, d.archived_at, d.remarks, p.application_no, c.full_name AS client_name,
+           u.full_name AS archived_by_name
+    FROM application_documents d
+    JOIN permits p ON d.permit_id = p.id
+    JOIN clients c ON d.client_id = c.id
+    LEFT JOIN users u ON d.archived_by = u.id
+    WHERE ${where}
+    ORDER BY d.archived_at DESC, d.id DESC
+    LIMIT 100
+  `).all(...params);
+  res.json({ documents });
 });
 
 /** Administrative document register (System Administrator). */

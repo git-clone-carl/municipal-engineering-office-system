@@ -235,8 +235,8 @@ export default function Payments() {
                     <td>{formatCurrency(p.amount)}</td>
                     <td>{p.cashier_name || '-'}</td>
                     <td>
-                      <button className="btn-icon" title="View / Print Receipt" onClick={() => openReceipt(p)}>
-                        <Icon name="print" size={16} />
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => openReceipt(p)}>
+                        Receipt
                       </button>
                     </td>
                   </tr>

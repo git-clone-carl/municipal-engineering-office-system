@@ -1148,8 +1148,9 @@ tbody tr:last-child td {
   width: 100%;
   max-width: 560px;
   max-height: 90vh;
-  overflow-y: auto;
-  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   box-shadow: var(--shadow-modal);
   border: var(--border);
 }
@@ -1165,6 +1166,7 @@ tbody tr:last-child td {
   align-items: center;
   justify-content: space-between;
   background: var(--white);
+  flex-shrink: 0;
 }
 
 .modal-header h3 {
@@ -1194,6 +1196,9 @@ tbody tr:last-child td {
 
 .modal-body {
   padding: 18px;
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .modal-footer {
@@ -1203,6 +1208,7 @@ tbody tr:last-child td {
   justify-content: flex-end;
   gap: 10px;
   background: var(--bg-subcard);
+  flex-shrink: 0;
 }
 
 /* Toolbar & Actions */
@@ -1474,8 +1480,8 @@ tbody tr:last-child td {
   width: 18px;
   height: 18px;
   margin: 0;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border: 1.5px solid #9ca3af;
+  border-radius: 5px;
   background: var(--white);
   cursor: pointer;
   flex-shrink: 0;
@@ -2659,5 +2665,477 @@ tbody tr:nth-child(8) { animation-delay: 0.21s; }
   }
   .pdf-toolbar {
     align-items: flex-start;
+  }
+}
+
+/* ==========================================================================
+   MEO Loading Screen UI
+   ========================================================================== */
+.meo-loading-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #f8fafc 0%, #fef2f2 100%);
+  padding: 24px;
+}
+
+.meo-loading-card {
+  background: #ffffff;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 16px;
+  padding: 36px 40px;
+  text-align: center;
+  box-shadow: 0 12px 32px rgba(127, 29, 29, 0.12);
+  max-width: 380px;
+  width: 100%;
+}
+
+.meo-loading-logo-wrap {
+  position: relative;
+  width: 96px;
+  height: 96px;
+  margin: 0 auto 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.meo-loading-logo {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  border-radius: 50%;
+  z-index: 1;
+}
+
+.meo-loading-spinner {
+  position: absolute;
+  inset: 0;
+  border: 4px solid #fee2e2;
+  border-top-color: #b91c1c;
+  border-radius: 50%;
+  animation: meo-spin 0.9s linear infinite;
+}
+
+@keyframes meo-spin {
+  to { transform: rotate(360deg); }
+}
+
+.meo-loading-title {
+  margin: 0 0 6px;
+  font-size: 18px;
+  font-weight: 800;
+  color: #7f1d1d;
+}
+
+.meo-loading-subtitle {
+  margin: 0 0 18px;
+  font-size: 13.5px;
+  color: #6b7280;
+}
+
+.meo-loading-bar {
+  height: 6px;
+  background: #fee2e2;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.meo-loading-bar-fill {
+  height: 100%;
+  width: 45%;
+  background: linear-gradient(90deg, #b91c1c, #ef4444);
+  border-radius: 999px;
+  animation: meo-bar 1.2s ease-in-out infinite;
+}
+
+@keyframes meo-bar {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(260%); }
+}
+
+/* ==========================================================================
+   Facebook-Style MEO Login Page
+   ========================================================================== */
+.fb-login-page {
+  position: relative;
+  min-height: 100vh;
+  background: #1a0608;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 20px;
+  overflow: hidden;
+}
+
+.fb-login-page .login-bg-overlay {
+  background: linear-gradient(
+    115deg,
+    rgba(42, 4, 9, 0.84) 0%,
+    rgba(78, 10, 18, 0.66) 52%,
+    rgba(24, 4, 8, 0.76) 100%
+  );
+  backdrop-filter: blur(2px);
+}
+
+.fb-login-container {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 1040px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 64px;
+}
+
+.fb-login-brand {
+  flex: 1;
+  max-width: 510px;
+}
+
+.fb-meo-logo {
+  width: 360px;
+  max-width: 100%;
+  height: auto;
+  object-fit: contain;
+  margin-bottom: 22px;
+  display: block;
+  filter: drop-shadow(0 4px 14px rgba(0, 0, 0, 0.65));
+}
+
+.fb-brand-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: #fde68a;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(253, 230, 138, 0.35);
+  margin-bottom: 14px;
+}
+
+.fb-brand-title {
+  margin: 0 0 12px;
+  font-size: 42px;
+  line-height: 1.12;
+  font-weight: 800;
+  color: #ffffff;
+  letter-spacing: -0.6px;
+  text-shadow: 0 2px 16px rgba(0, 0, 0, 0.5);
+}
+
+.fb-brand-subtitle {
+  margin: 0 0 22px;
+  font-size: 17px;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.88);
+  font-weight: 400;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.45);
+}
+
+.fb-brand-highlights {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fb-brand-highlights span {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  padding: 6px 12px;
+  border-radius: 999px;
+  backdrop-filter: blur(6px);
+}
+
+.fb-login-card-wrap {
+  width: 100%;
+  max-width: 420px;
+  flex-shrink: 0;
+}
+
+.fb-login-card {
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: 18px;
+  padding: 28px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.38);
+}
+
+.fb-card-header {
+  margin-bottom: 16px;
+}
+
+.fb-card-header h2 {
+  margin: 0 0 2px;
+  font-size: 22px;
+  font-weight: 800;
+  color: #111827;
+  letter-spacing: -0.3px;
+}
+
+.fb-card-header p {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #7f1d1d;
+}
+
+.fb-role-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  background: #f0f2f5;
+  padding: 4px;
+  border-radius: 8px;
+  margin-bottom: 14px;
+}
+
+.fb-role-tab {
+  border: none;
+  background: transparent;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 13.5px;
+  color: #4b5563;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.fb-role-tab.active {
+  background: #ffffff;
+  color: #b91c1c;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.fb-auth-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.fb-auth-toggle-btn {
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 13px;
+  color: #374151;
+  cursor: pointer;
+}
+
+.fb-auth-toggle-btn.active {
+  background: #fef2f2;
+  border-color: #b91c1c;
+  color: #b91c1c;
+}
+
+.fb-card-role-caption {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #6b7280;
+  margin-bottom: 12px;
+  text-align: center;
+}
+
+.fb-input {
+  padding: 12px 14px;
+  font-size: 15px;
+  border-radius: 6px;
+}
+
+.fb-login-btn {
+  width: 100%;
+  padding: 12px;
+  font-size: 16px;
+  font-weight: 700;
+  border-radius: 6px;
+}
+
+.fb-divider {
+  height: 1px;
+  background: #dadde1;
+  margin: 18px 0;
+}
+
+.fb-signup-btn {
+  background: #15803d;
+  color: #ffffff;
+  border: none;
+  padding: 11px 28px;
+  min-width: 170px;
+  font-size: 14.5px;
+  font-weight: 700;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.fb-signup-btn:hover {
+  background: #166534;
+  color: #ffffff;
+}
+
+.fb-login-footer {
+  text-align: center;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.9);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  margin-top: 18px;
+}
+
+@media (max-width: 860px) {
+  .fb-login-container {
+    flex-direction: column;
+    text-align: center;
+    gap: 24px;
+  }
+  .fb-meo-logo {
+    margin: 0 auto 12px;
+  }
+  .fb-brand-title {
+    font-size: 28px;
+  }
+  .fb-brand-subtitle {
+    font-size: 16px;
+  }
+}
+
+/* ==========================================================================
+   Real-Time Engineer Remarks Feed
+   ========================================================================== */
+.live-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 700;
+  background: #dcfce7;
+  color: #166534;
+}
+
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #16a34a;
+  animation: meo-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes meo-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.8); }
+}
+
+.remarks-feed {
+  display: flex;
+  flex-direction: column;
+}
+
+.remarks-feed-item {
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border-color, #e5e7eb);
+  transition: background 0.15s ease;
+}
+
+.remarks-feed-item:last-child {
+  border-bottom: none;
+}
+
+.remarks-feed-item:hover {
+  background: #fef2f2;
+}
+
+.remarks-feed-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+}
+
+.remarks-feed-body {
+  font-size: 13.5px;
+  color: #1f2937;
+}
+
+/* ==========================================================================
+   Permit Application Details Modal - Left-Side Vertical Tabs
+   ========================================================================== */
+.permit-modal-layout {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.permit-modal-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: sticky;
+  top: 0;
+  background: #f9fafb;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid var(--border-color, #e5e7eb);
+}
+
+.permit-modal-tab {
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #374151;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.permit-modal-tab:hover {
+  background: #ffffff;
+  color: #7f1d1d;
+}
+
+.permit-modal-tab.active {
+  background: #7f1d1d;
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(127, 29, 29, 0.25);
+}
+
+.permit-modal-content {
+  min-width: 0;
+}
+
+@media (max-width: 768px) {
+  .permit-modal-layout {
+    grid-template-columns: 1fr;
+  }
+  .permit-modal-tabs {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .permit-modal-tab {
+    width: auto;
+    flex: 1 1 auto;
+    text-align: center;
   }
 }

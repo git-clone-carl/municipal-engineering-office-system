@@ -12,18 +12,41 @@ import AuditLogs from './pages/AuditLogs';
 import Users from './pages/Users';
 import RBAC from './pages/RBAC';
 import Settings from './pages/Settings';
+import Archive from './pages/Archive';
+
+function MeoLoadingScreen({ message = 'Loading Municipal Engineering Office System...' }) {
+  return (
+    <div className="meo-loading-screen">
+      <div className="meo-loading-card">
+        <div className="meo-loading-logo-wrap">
+          <img src="/gumacalogo.png" alt="MEO Logo" className="meo-loading-logo" />
+          <div className="meo-loading-spinner" />
+        </div>
+        <h2 className="meo-loading-title">Municipal Engineering Office</h2>
+        <p className="meo-loading-subtitle">{message}</p>
+        <div className="meo-loading-bar">
+          <div className="meo-loading-bar-fill" />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function PrivateRoute({ children, module }) {
-  const { user, loading, hasAccess } = useAuth();
-  if (loading) return <div className="loading">Loading...</div>;
+  const { user, loading, authLoadingScreen, hasAccess } = useAuth();
+  if (loading || authLoadingScreen) {
+    return <MeoLoadingScreen message={authLoadingScreen ? 'Signing in to your dashboard...' : 'Loading...'} />;
+  }
   if (!user) return <Navigate to="/login" />;
   if (module && !hasAccess(module)) return <Navigate to="/" />;
   return children;
 }
 
 function AppRoutes() {
-  const { user, loading } = useAuth();
-  if (loading) return <div className="loading">Loading...</div>;
+  const { user, loading, authLoadingScreen } = useAuth();
+  if (loading || authLoadingScreen) {
+    return <MeoLoadingScreen message={authLoadingScreen ? 'Signing in to your dashboard...' : 'Loading...'} />;
+  }
 
   return (
     <Routes>
@@ -32,6 +55,7 @@ function AppRoutes() {
         <Route path="/" element={<PrivateRoute module="dashboard"><Dashboard /></PrivateRoute>} />
         <Route path="/clients" element={<PrivateRoute module="clients"><Clients /></PrivateRoute>} />
         <Route path="/permits" element={<PrivateRoute module="permits"><Permits /></PrivateRoute>} />
+        <Route path="/archive" element={<PrivateRoute module="permits"><Archive /></PrivateRoute>} />
         <Route path="/payments" element={<PrivateRoute module="payments"><Payments /></PrivateRoute>} />
         <Route path="/reports" element={<PrivateRoute module="reports"><Reports /></PrivateRoute>} />
         <Route path="/audit" element={<PrivateRoute module="audit_logs"><AuditLogs /></PrivateRoute>} />

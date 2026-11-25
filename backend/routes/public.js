@@ -9,11 +9,7 @@ const {
   PERMIT_TYPES, PERMIT_PREFIXES, ELECTRICAL_SUBTYPES,
   ELECTRICAL_REQUIREMENTS, DEFAULT_REQUIREMENTS, getRequirementsForPermit,
 } = require('../constants/permits');
-const {
-  isValidEmail, isMailerConfigured, sendPermitStatusEmail,
-  sendEmailVerificationCode, verifyEmailVerificationCode,
-} = require('../utils/mailer');
-const { verifyEmailDeliverable, validatePermitFields } = require('../utils/validation');
+const { validatePermitFields } = require('../utils/validation');
 
 const router = express.Router();
 
@@ -63,31 +59,6 @@ router.get('/requirements', (_req, res) => {
     electricalSubtypes: ELECTRICAL_REQUIREMENTS,
     office,
   });
-});
-
-router.post('/validate-email', async (req, res) => {
-  const { email } = req.body || {};
-  const result = await verifyEmailDeliverable(email);
-  res.json({ ...result, smtpConfigured: isMailerConfigured() });
-});
-
-router.post('/send-email-code', async (req, res) => {
-  const { email } = req.body || {};
-  try {
-    const result = await sendEmailVerificationCode(email);
-    res.json({ success: true, ...result });
-  } catch (err) {
-    res.status(400).json({ error: err.message || 'Failed to send verification code.' });
-  }
-});
-
-router.post('/verify-email-code', (req, res) => {
-  const { email, code } = req.body || {};
-  const result = verifyEmailVerificationCode(email, code);
-  if (!result.verified) {
-    return res.status(400).json({ error: result.error });
-  }
-  res.json({ success: true, ...result });
 });
 
 router.post('/apply', uploadMultiplePdfs, async (req, res, next) => {
@@ -266,19 +237,6 @@ router.post('/apply', uploadMultiplePdfs, async (req, res, next) => {
       permitId,
     );
 
-    const office = db.prepare('SELECT * FROM office_info WHERE id = 1').get();
-    const emailResult = await sendPermitStatusEmail({
-      to: cleanEmail,
-      clientName: cleanName,
-      applicationNo: application_no,
-      permitType: permit_type,
-      status: 'submitted',
-      remarks: String(notes || '').trim(),
-      totalFee: total_fee,
-      projectLocation: cleanLocation,
-      office,
-    });
-
     res.status(201).json({
       permit_id: permitId,
       application_no,
@@ -289,9 +247,6 @@ router.post('/apply', uploadMultiplePdfs, async (req, res, next) => {
       total_fee,
       uploaded_count: expectedReqs.length,
       status: 'submitted',
-      email_sent: emailResult.sent,
-      email_to: emailResult.to || null,
-      email_error: emailResult.error || null,
     });
   } catch (err) {
     next(err);

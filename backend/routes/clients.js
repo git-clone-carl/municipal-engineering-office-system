@@ -3,7 +3,6 @@ const db = require('../database/db');
 const { authenticate } = require('../middleware/auth');
 const { checkPermission, logAudit, getClientIp } = require('../middleware/rbac');
 const { ensureClientForUser } = require('../middleware/access');
-const { isValidEmail } = require('../utils/mailer');
 
 const router = express.Router();
 
@@ -53,9 +52,6 @@ router.post('/', authenticate, checkPermission('clients'), (req, res) => {
     return res.status(400).json({ error: 'Client name is required' });
   }
   const cleanEmail = String(email || '').trim();
-  if (!isValidEmail(cleanEmail)) {
-    return res.status(400).json({ error: 'A valid email address is required' });
-  }
   const client_id = generateClientId();
   const result = db.prepare(`
     INSERT INTO clients (client_id, full_name, contact_number, email, address)
@@ -70,9 +66,6 @@ router.put('/:id', authenticate, checkPermission('clients'), (req, res) => {
   const client = db.prepare('SELECT * FROM clients WHERE id = ?').get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
   const nextEmail = String(email !== undefined ? email : client.email || '').trim();
-  if (!isValidEmail(nextEmail)) {
-    return res.status(400).json({ error: 'A valid email address is required' });
-  }
   db.prepare(`
     UPDATE clients SET full_name=?, contact_number=?, email=?, address=?, updated_at=CURRENT_TIMESTAMP
     WHERE id=?

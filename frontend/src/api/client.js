@@ -31,9 +31,6 @@ export const api = {
   getPermissions: () => request('/auth/permissions'),
   getLanStatus: () => request('/auth/lan-status'),
   getPublicRequirements: () => request('/public/requirements'),
-  validateEmail: (email) => request('/public/validate-email', { method: 'POST', body: JSON.stringify({ email }) }),
-  sendEmailCode: (email) => request('/public/send-email-code', { method: 'POST', body: JSON.stringify({ email }) }),
-  verifyEmailCode: (email, code) => request('/public/verify-email-code', { method: 'POST', body: JSON.stringify({ email, code }) }),
   submitPublicApplication: (formData) => request('/public/apply', { method: 'POST', body: formData }),
 
   getDashboardStats: () => request('/dashboard/stats'),
@@ -41,6 +38,7 @@ export const api = {
   getStatusDistribution: () => request('/dashboard/status-distribution'),
   getWeeklyTransactions: () => request('/dashboard/weekly-transactions'),
   getRecentActivities: () => request('/dashboard/recent-activities'),
+  getEngineerRemarks: () => request('/dashboard/engineer-remarks'),
 
   getClients: (params) => request(`/clients?${new URLSearchParams(params)}`),
   getMyClient: () => request('/clients/me'),
@@ -62,6 +60,8 @@ export const api = {
   rejectPermit: (id, remarks) =>
     request(`/permits/${id}/reject`, { method: 'POST', body: JSON.stringify({ remarks }) }),
   releasePermit: (id) => request(`/permits/${id}/release`, { method: 'POST' }),
+  archivePermit: (id) => request(`/permits/${id}/archive`, { method: 'PUT' }),
+  restorePermit: (id) => request(`/permits/${id}/restore`, { method: 'PUT' }),
 
   getPermitDocuments: (permitId) => request(`/documents/permit/${permitId}`),
   uploadDocument: (permitId, formData) =>
@@ -70,9 +70,14 @@ export const api = {
     request(`/documents/${documentId}/replace`, { method: 'POST', body: formData }),
   updateDocumentStatus: (documentId, status, remarks = '') =>
     request(`/documents/${documentId}/status`, { method: 'PUT', body: JSON.stringify({ status, remarks }) }),
+  archiveDocument: (documentId) =>
+    request(`/documents/${documentId}/archive`, { method: 'PUT' }),
+  restoreDocument: (documentId) =>
+    request(`/documents/${documentId}/restore`, { method: 'PUT' }),
   getDocumentBlob: (documentId, download = false) =>
     requestBlob(`/documents/${documentId}/file${download ? '?download=1' : ''}`),
   getDocumentRecords: (params) => request(`/documents/records?${new URLSearchParams(params)}`),
+  getArchivedDocuments: (params = {}) => request(`/documents/archived?${new URLSearchParams(params)}`),
 
   getPayments: (params) => request(`/payments?${new URLSearchParams(params)}`),
   getPendingPayments: () => request('/payments/pending'),
@@ -92,6 +97,7 @@ export const api = {
   getAuditLogs: (params) => request(`/audit?${new URLSearchParams(params)}`),
 
   getNotifications: () => request('/notifications'),
+  getNotificationStreamUrl: () => `${API_BASE}/notifications/stream?token=${encodeURIComponent(localStorage.getItem('token') || '')}`,
   markNotificationRead: (id) => request(`/notifications/${id}/read`, { method: 'PUT' }),
   markAllNotificationsRead: () => request('/notifications/read-all', { method: 'PUT' }),
 
@@ -104,6 +110,5 @@ export const api = {
   getBackupInfo: () => request('/settings/backup/info'),
   createBackup: () => request('/settings/backup', { method: 'POST' }),
   restoreBackup: (filename) => request('/settings/restore', { method: 'POST', body: JSON.stringify({ filename }) }),
-  sendTestEmail: (to) => request('/settings/test-email', { method: 'POST', body: JSON.stringify({ to }) }),
   getPermitPreview: (id) => request(`/settings/permit/${id}/preview`),
 };
