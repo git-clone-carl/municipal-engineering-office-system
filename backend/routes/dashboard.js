@@ -131,7 +131,7 @@ router.get('/engineer-remarks', authenticate, checkPermission('dashboard'), (req
   `).all(...params);
 
   const combined = [...approvalRemarks, ...documentRemarks]
-    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
     .slice(0, 12);
 
   res.json(combined);

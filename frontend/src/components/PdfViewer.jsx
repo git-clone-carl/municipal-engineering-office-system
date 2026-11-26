@@ -11,7 +11,7 @@ import { Icon } from './UI';
  * its own zoom controls; the toolbar adds app-level zoom, fullscreen and
  * permission-based download.
  */
-export default function PdfViewer({ document, canDownload = true, onClose }) {
+export default function PdfViewer({ document, canDownload = true, canReplace = false, onReplace, onClose }) {
   const [url, setUrl] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -97,6 +97,11 @@ export default function PdfViewer({ document, canDownload = true, onClose }) {
           {canDownload && (
             <button type="button" className="btn btn-secondary btn-sm" onClick={download} disabled={downloading}>
               <Icon name="download" size={14} /> {downloading ? 'Downloading...' : 'Download'}
+            </button>
+          )}
+          {canReplace && onReplace && (
+            <button type="button" className="btn btn-primary btn-sm" onClick={onReplace}>
+              Replace PDF
             </button>
           )}
           {onClose && (

@@ -62,6 +62,7 @@ export const api = {
   releasePermit: (id) => request(`/permits/${id}/release`, { method: 'POST' }),
   archivePermit: (id) => request(`/permits/${id}/archive`, { method: 'PUT' }),
   restorePermit: (id) => request(`/permits/${id}/restore`, { method: 'PUT' }),
+  deletePermit: (id) => request(`/permits/${id}`, { method: 'DELETE' }),
 
   getPermitDocuments: (permitId) => request(`/documents/permit/${permitId}`),
   uploadDocument: (permitId, formData) =>
@@ -74,6 +75,8 @@ export const api = {
     request(`/documents/${documentId}/archive`, { method: 'PUT' }),
   restoreDocument: (documentId) =>
     request(`/documents/${documentId}/restore`, { method: 'PUT' }),
+  deleteDocument: (documentId) =>
+    request(`/documents/${documentId}`, { method: 'DELETE' }),
   getDocumentBlob: (documentId, download = false) =>
     requestBlob(`/documents/${documentId}/file${download ? '?download=1' : ''}`),
   getDocumentRecords: (params) => request(`/documents/records?${new URLSearchParams(params)}`),

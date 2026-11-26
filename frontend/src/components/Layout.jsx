@@ -2,36 +2,24 @@ import { useState, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../api/client';
-import { Icon, Modal, timeAgo } from './UI';
+import { Icon, timeAgo } from './UI';
 
 const NAV_ITEMS = [
   { path: '/', label: 'Dashboard', icon: 'dashboard', module: 'dashboard' },
-  { path: '/clients', label: 'Client Management', icon: 'clients', module: 'clients' },
+  { path: '/clients', label: 'Client Management', icon: 'clients', module: 'clients', roles: ['engineering_staff', 'municipal_engineer'] },
   { path: '/permits', label: 'Permit Applications', icon: 'permits', module: 'permits' },
-  { path: '/archive', label: 'Archive', icon: 'reports', module: 'permits', roles: ['admin', 'municipal_engineer'] },
+  { path: '/archive', label: 'Archive', icon: 'reports', module: 'permits', roles: ['admin', 'engineering_staff', 'municipal_engineer'] },
   { path: '/payments', label: 'Payments', icon: 'payments', module: 'payments' },
-  { path: '/reports', label: 'Reports', icon: 'reports', module: 'reports' },
-  { path: '/audit', label: 'Audit Logs', icon: 'audit', module: 'audit_logs' },
-  { path: '/users', label: 'User Management', icon: 'users', module: 'users' },
-  { path: '/rbac', label: 'RBAC', icon: 'shield', module: 'rbac' },
-  { path: '/settings', label: 'Settings', icon: 'settings', module: 'settings' },
+  { path: '/reports', label: 'Reports', icon: 'reports', module: 'reports', roles: ['admin'] },
+  { path: '/audit', label: 'Audit Logs', icon: 'audit', module: 'audit_logs', roles: ['admin'] },
+  { path: '/users', label: 'User Management', icon: 'users', module: 'users', roles: ['admin'] },
+  { path: '/rbac', label: 'RBAC', icon: 'shield', module: 'rbac', roles: ['admin'] },
+  { path: '/settings', label: 'Settings', icon: 'settings', module: 'settings', roles: ['admin'] },
 ];
 
 export default function Layout() {
-  const { user, logout, hasAccess, showStaffGuide, dismissStaffGuide } = useAuth();
+  const { user, logout, hasAccess } = useAuth();
   const navigate = useNavigate();
-  const [dontShowAgain, setDontShowAgain] = useState(false);
-
-  useEffect(() => {
-    if (showStaffGuide) setDontShowAgain(false);
-  }, [showStaffGuide]);
-
-  const handleCloseStaffGuide = () => {
-    if (dontShowAgain && user?.id) {
-      localStorage.setItem(`hide_staff_guide_${user.id}`, 'true');
-    }
-    dismissStaffGuide();
-  };
   const [mobileOpen, setMobileOpen] = useState(false);
   const [datetime, setDatetime] = useState(new Date());
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -271,48 +259,6 @@ export default function Layout() {
 
       {/* Backdrop for Mobile Drawer */}
       {mobileOpen && <div className="modal-overlay" style={{ zIndex: 99 }} onClick={() => setMobileOpen(false)} />}
-
-      {/* Staff / Engineer Welcome Video Modal */}
-      <Modal
-        open={showStaffGuide}
-        onClose={handleCloseStaffGuide}
-        title="Welcome to MEO Gumaca — Staff Quick Guide"
-        large
-        footer={(
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: 12 }}>
-            <label htmlFor="dont-show-staff-guide" className="ui-checkbox-label" style={{ cursor: 'pointer', margin: 0 }}>
-              <input
-                type="checkbox"
-                id="dont-show-staff-guide"
-                className="ui-checkbox"
-                checked={dontShowAgain}
-                onChange={(e) => setDontShowAgain(e.target.checked)}
-              />
-              <span>Do not show this again</span>
-            </label>
-            <button type="button" className="btn btn-primary" onClick={handleCloseStaffGuide}>
-              Got it
-            </button>
-          </div>
-        )}
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-          <video
-            src="/welcome-staff-guide.mp4"
-            autoPlay
-            loop
-            playsInline
-            style={{
-              width: 'auto',
-              maxWidth: '100%',
-              maxHeight: '65vh',
-              borderRadius: 12,
-              display: 'block',
-              margin: '0 auto',
-            }}
-          />
-        </div>
-      </Modal>
     </div>
   );
 }

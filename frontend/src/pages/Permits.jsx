@@ -52,7 +52,7 @@ export default function Permits() {
   const isStaff = ['engineering_staff', 'admin'].includes(user?.role);
   const isEngineer = user?.role === 'municipal_engineer';
   const canReviewDocuments = ['admin', 'engineering_staff', 'municipal_engineer'].includes(user?.role);
-  const canArchive = ['admin', 'municipal_engineer'].includes(user?.role);
+  const canArchive = ['admin', 'engineering_staff', 'municipal_engineer'].includes(user?.role);
 
   const [permits, setPermits] = useState([]);
   const [total, setTotal] = useState(0);
@@ -222,6 +222,17 @@ export default function Permits() {
     try {
       await api.restorePermit(permit.id);
       setPageSuccess(`Application ${permit.application_no} restored from Archive.`);
+      await load(true);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handleDeletePermit = async (permit) => {
+    if (!confirm(`Permanently delete application ${permit.application_no}? This cannot be undone.`)) return;
+    try {
+      await api.deletePermit(permit.id);
+      setPageSuccess(`Application ${permit.application_no} permanently deleted.`);
       await load(true);
     } catch (err) {
       setError(err.message);
@@ -576,13 +587,22 @@ export default function Permits() {
                         </button>
                       )}
                       {canArchive && archiveView === 'archived' && (
-                        <button
-                          type="button"
-                          className="btn btn-success btn-sm"
-                          onClick={() => handleRestorePermit(p)}
-                        >
-                          Restore
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            className="btn btn-success btn-sm"
+                            onClick={() => handleRestorePermit(p)}
+                          >
+                            Restore
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-danger btn-sm"
+                            onClick={() => handleDeletePermit(p)}
+                          >
+                            Delete
+                          </button>
+                        </>
                       )}
                     </td>
                   </tr>

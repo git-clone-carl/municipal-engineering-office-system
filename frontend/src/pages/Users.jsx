@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import { Icon, Modal, Pagination, ROLE_LABELS, CustomSelect } from '../components/UI';
 
-const emptyForm = { username: '', password: '', full_name: '', role: 'viewer', status: 'active' };
+const emptyForm = { username: '', password: '', full_name: '', role: 'engineering_staff', status: 'active' };
 
 export default function Users() {
   const [users, setUsers] = useState([]);
@@ -136,7 +136,9 @@ export default function Users() {
             <CustomSelect
               value={form.role}
               onChange={(val) => setForm({ ...form, role: val })}
-              options={Object.entries(ROLE_LABELS).map(([key, label]) => ({ value: key, label }))}
+              options={Object.entries(ROLE_LABELS)
+                .filter(([key]) => key !== 'viewer')
+                .map(([key, label]) => ({ value: key, label }))}
               style={{ width: '100%' }}
             />
           </div>

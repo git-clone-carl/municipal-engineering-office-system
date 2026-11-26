@@ -336,20 +336,41 @@ export function formatCurrency(n) {
   return `₱ ${Number(n || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 }
 
+export function parseServerDate(d) {
+  if (!d) return null;
+  if (d instanceof Date) return d;
+  const s = String(d).trim();
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(s)) {
+    return new Date(`${s.replace(' ', 'T')}Z`);
+  }
+  return new Date(s);
+}
+
 export function formatDate(d) {
-  if (!d) return '-';
-  return new Date(d).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+  const dt = parseServerDate(d);
+  if (!dt || Number.isNaN(dt.getTime())) return '-';
+  return dt.toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 export function formatDateTime(d) {
-  if (!d) return '-';
-  return new Date(d).toLocaleString('en-PH');
+  const dt = parseServerDate(d);
+  if (!dt || Number.isNaN(dt.getTime())) return '-';
+  return dt.toLocaleString('en-PH', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
 }
 
 export function timeAgo(d) {
-  const diff = Date.now() - new Date(d).getTime();
+  const dt = parseServerDate(d);
+  if (!dt || Number.isNaN(dt.getTime())) return '-';
+  const diff = Date.now() - dt.getTime();
+  if (diff < 60000) return 'Just now';
   const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'Just now';
   if (mins < 60) return `${mins} min${mins > 1 ? 's' : ''} ago`;
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs} hour${hrs > 1 ? 's' : ''} ago`;
@@ -363,7 +384,7 @@ export { PERMIT_TYPES };
 export const ROLE_LABELS = {
   admin: 'System Administrator',
   municipal_engineer: 'Municipal Engineer',
-  engineering_staff: 'WNGR Staff',
+  engineering_staff: 'Staff',
   viewer: 'Client',
 };
 

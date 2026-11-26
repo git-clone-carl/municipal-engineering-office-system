@@ -59,6 +59,32 @@ export default function Archive() {
     }
   };
 
+  const deletePermit = async (permit) => {
+    if (!confirm(`Permanently delete permit ${permit.application_no}? This cannot be undone.`)) return;
+    setError('');
+    setSuccess('');
+    try {
+      await api.deletePermit(permit.id);
+      setSuccess(`Deleted permit application ${permit.application_no}.`);
+      await load();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const deleteDocument = async (doc) => {
+    if (!confirm(`Permanently delete PDF "${doc.original_name}"?`)) return;
+    setError('');
+    setSuccess('');
+    try {
+      await api.deleteDocument(doc.id);
+      setSuccess(`Deleted PDF "${doc.original_name}".`);
+      await load();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   return (
     <div>
       <h1 className="page-title">Archive</h1>
@@ -137,6 +163,13 @@ export default function Archive() {
                       >
                         Restore
                       </button>
+                      <button
+                        type="button"
+                        className="btn btn-danger btn-sm"
+                        onClick={() => deletePermit(p)}
+                      >
+                        Delete
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -183,6 +216,13 @@ export default function Archive() {
                         onClick={() => restoreDocument(d)}
                       >
                         Restore
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-danger btn-sm"
+                        onClick={() => deleteDocument(d)}
+                      >
+                        Delete
                       </button>
                     </td>
                   </tr>

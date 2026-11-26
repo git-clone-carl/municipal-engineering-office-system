@@ -178,6 +178,19 @@ export default function DocumentsPanel({ permit, user, onChanged }) {
     }
   };
 
+  const handleDelete = async (doc) => {
+    if (!confirm(`Permanently delete "${doc.original_name}"?`)) return;
+    resetMessages();
+    try {
+      await api.deleteDocument(doc.id);
+      setSuccess(`Deleted "${doc.original_name}".`);
+      await load();
+      onChanged?.();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   const activeDocs = documents.filter((d) => !d.is_archived);
   const archivedDocs = documents.filter((d) => d.is_archived);
   const visibleDocs = docTab === 'archived' ? archivedDocs : activeDocs;
@@ -269,9 +282,9 @@ export default function DocumentsPanel({ permit, user, onChanged }) {
                           Download
                         </button>
                       )}
-                      {!doc.is_archived && canUpload && doc.status !== 'accepted' && (
+                      {!doc.is_archived && (canReview || (canUpload && doc.status !== 'accepted')) && (
                         <button type="button" className="btn btn-secondary btn-sm" onClick={() => openReplace(doc)}>
-                          Replace File
+                          Replace PDF
                         </button>
                       )}
                       {!doc.is_archived && canReview && (
@@ -287,6 +300,11 @@ export default function DocumentsPanel({ permit, user, onChanged }) {
                       {canReview && doc.is_archived && (
                         <button type="button" className="btn btn-success btn-sm" onClick={() => handleRestore(doc)}>
                           Restore
+                        </button>
+                      )}
+                      {canReview && (
+                        <button type="button" className="btn btn-danger btn-sm" onClick={() => handleDelete(doc)}>
+                          Delete
                         </button>
                       )}
                     </div>
@@ -411,6 +429,12 @@ export default function DocumentsPanel({ permit, user, onChanged }) {
           <PdfViewer
             document={viewTarget}
             canDownload={canDownload}
+            canReplace={!viewTarget.is_archived && (canReview || (canUpload && viewTarget.status !== 'accepted'))}
+            onReplace={() => {
+              const target = viewTarget;
+              setViewTarget(null);
+              openReplace(target);
+            }}
             onClose={() => setViewTarget(null)}
           />
         )}

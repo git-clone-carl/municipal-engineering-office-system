@@ -18,14 +18,18 @@ function MeoLoadingScreen({ message = 'Loading Municipal Engineering Office Syst
   return (
     <div className="meo-loading-screen">
       <div className="meo-loading-card">
-        <div className="meo-loading-logo-wrap">
-          <img src="/gumacalogo.png" alt="MEO Logo" className="meo-loading-logo" />
-          <div className="meo-loading-spinner" />
+        <div className="meo-loading-banner">
+          <img src="/gumacalogo.png" alt="Municipality of Gumaca" className="meo-loading-logo" />
         </div>
-        <h2 className="meo-loading-title">Municipal Engineering Office</h2>
-        <p className="meo-loading-subtitle">{message}</p>
-        <div className="meo-loading-bar">
-          <div className="meo-loading-bar-fill" />
+        <div className="meo-loading-body">
+          <div className="meo-loading-row">
+            <span className="meo-loading-spinner" />
+            <h2 className="meo-loading-title">Municipal Engineering Office</h2>
+          </div>
+          <p className="meo-loading-subtitle">{message}</p>
+          <div className="meo-loading-bar">
+            <div className="meo-loading-bar-fill" />
+          </div>
         </div>
       </div>
     </div>

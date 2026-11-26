@@ -2676,46 +2676,56 @@ tbody tr:nth-child(8) { animation-delay: 0.21s; }
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #f8fafc 0%, #fef2f2 100%);
+  background: linear-gradient(135deg, #2b060b 0%, #5c1019 50%, #3a0910 100%);
   padding: 24px;
 }
 
 .meo-loading-card {
   background: #ffffff;
-  border: 1px solid var(--border-color, #e5e7eb);
-  border-radius: 16px;
-  padding: 36px 40px;
+  border-radius: 18px;
+  overflow: hidden;
   text-align: center;
-  box-shadow: 0 12px 32px rgba(127, 29, 29, 0.12);
-  max-width: 380px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+  max-width: 400px;
   width: 100%;
 }
 
-.meo-loading-logo-wrap {
-  position: relative;
-  width: 96px;
-  height: 96px;
-  margin: 0 auto 18px;
+.meo-loading-banner {
+  background: linear-gradient(135deg, #7f1d1d 0%, #991b1b 100%);
+  padding: 24px 28px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .meo-loading-logo {
-  width: 72px;
-  height: 72px;
+  width: 240px;
+  max-width: 100%;
+  height: auto;
   object-fit: contain;
-  border-radius: 50%;
-  z-index: 1;
+  display: block;
+}
+
+.meo-loading-body {
+  padding: 24px 28px 28px;
+}
+
+.meo-loading-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 8px;
 }
 
 .meo-loading-spinner {
-  position: absolute;
-  inset: 0;
-  border: 4px solid #fee2e2;
-  border-top-color: #b91c1c;
+  width: 20px;
+  height: 20px;
+  border: 3px solid #fee2e2;
+  border-top-color: #991b1b;
   border-radius: 50%;
-  animation: meo-spin 0.9s linear infinite;
+  flex-shrink: 0;
+  animation: meo-spin 0.8s linear infinite;
 }
 
 @keyframes meo-spin {
@@ -2723,10 +2733,10 @@ tbody tr:nth-child(8) { animation-delay: 0.21s; }
 }
 
 .meo-loading-title {
-  margin: 0 0 6px;
-  font-size: 18px;
+  margin: 0;
+  font-size: 17px;
   font-weight: 800;
-  color: #7f1d1d;
+  color: #111827;
 }
 
 .meo-loading-subtitle {
@@ -3138,4 +3148,49 @@ tbody tr:nth-child(8) { animation-delay: 0.21s; }
     flex: 1 1 auto;
     text-align: center;
   }
+}
+
+/* Centered FB-style Login Layout */
+.fb-login-centered {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 440px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+
+.fb-centered-brand {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.fb-meo-logo-centered {
+  width: 320px;
+  max-width: 100%;
+  height: auto;
+  object-fit: contain;
+  margin-bottom: 12px;
+  filter: drop-shadow(0 4px 14px rgba(0, 0, 0, 0.7));
+}
+
+.fb-brand-title-centered {
+  margin: 0 0 4px;
+  font-size: 28px;
+  line-height: 1.2;
+  font-weight: 800;
+  color: #ffffff;
+  letter-spacing: -0.4px;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.55);
+}
+
+.fb-brand-subtitle-centered {
+  margin: 0;
+  font-size: 14.5px;
+  color: rgba(255, 255, 255, 0.9);
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.5);
 }

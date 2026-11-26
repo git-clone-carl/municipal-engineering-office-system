@@ -3,8 +3,7 @@ import { api } from '../api/client';
 import { ROLE_LABELS } from '../components/UI';
 
 // Admin is not editable here; its full access is enforced on the backend.
-const ALL_ROLES = ['admin', 'engineering_staff', 'municipal_engineer', 'viewer'];
-const roles = ALL_ROLES.filter((role) => role !== 'admin');
+const roles = ['engineering_staff', 'municipal_engineer'];
 
 export default function RBAC() {
   const [permissions, setPermissions] = useState([]);

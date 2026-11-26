@@ -150,7 +150,8 @@ router.post('/:id/replace', authenticate, checkPermission('permits'), uploadPdf,
     return res.status(404).json({ error: 'Document not found' });
   }
   const permit = loadPermitById(doc.permit_id);
-  if (!permit || !canUploadDocuments(req.user, permit)) {
+  const isOfficeUser = ['admin', 'engineering_staff', 'municipal_engineer'].includes(req.user.role);
+  if (!permit || (!isOfficeUser && !canUploadDocuments(req.user, permit))) {
     removeUploadedFile(req.file);
     return res.status(403).json({ error: 'You cannot replace this document' });
   }
@@ -277,6 +278,22 @@ router.put('/:id/restore', authenticate, checkPermission('permits'),
     res.json({ success: true, document: documentMetadata(loadDocument(doc.id)) });
   });
 
+router.delete('/:id', authenticate, checkPermission('permits'),
+  requireRole('admin', 'engineering_staff', 'municipal_engineer'), (req, res) => {
+    const doc = loadDocument(req.params.id);
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    const permit = loadPermitById(doc.permit_id);
+    const filePath = documentPath(doc.stored_name);
+
+    db.prepare('DELETE FROM application_documents WHERE id = ?').run(doc.id);
+    try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch { /* best effort */ }
+
+    logAudit(req.user.id, req.user.username, req.user.role,
+      `Deleted document ${doc.document_no}${permit ? ` for ${permit.application_no}` : ''}`, getClientIp(req));
+
+    res.json({ success: true });
+  });
+
 router.get('/:id/file', authenticate, (req, res) => {
   const doc = loadDocument(req.params.id);
   if (!doc) return res.status(404).json({ error: 'Document not found' });
@@ -302,8 +319,8 @@ router.get('/:id/file', authenticate, (req, res) => {
   res.sendFile(filePath);
 });
 
-/** Archived PDF documents register (Admin & Municipal Engineer). */
-router.get('/archived', authenticate, requireRole('admin', 'municipal_engineer'), (req, res) => {
+/** Archived PDF documents register (Admin, Staff & Municipal Engineer). */
+router.get('/archived', authenticate, requireRole('admin', 'engineering_staff', 'municipal_engineer'), (req, res) => {
   const { search = '' } = req.query;
   let where = 'COALESCE(d.is_archived, 0) = 1';
   const params = [];

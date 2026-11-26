@@ -8,7 +8,6 @@ export function AuthProvider({ children }) {
   const [permissions, setPermissions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [authLoadingScreen, setAuthLoadingScreen] = useState(false);
-  const [showStaffGuide, setShowStaffGuide] = useState(false);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -36,10 +35,6 @@ export function AuthProvider({ children }) {
       await new Promise((r) => setTimeout(r, 900));
       setUser(data.user);
       setPermissions(permData.modules);
-      if (data.user?.role === 'engineering_staff') {
-        const hidden = localStorage.getItem(`hide_staff_guide_${data.user.id}`) === 'true';
-        if (!hidden) setShowStaffGuide(true);
-      }
       return data;
     } finally {
       setAuthLoadingScreen(false);
@@ -65,10 +60,7 @@ export function AuthProvider({ children }) {
     localStorage.removeItem('token');
     setUser(null);
     setPermissions([]);
-    setShowStaffGuide(false);
   };
-
-  const dismissStaffGuide = () => setShowStaffGuide(false);
 
   const hasAccess = (module) => permissions.includes(module);
 
@@ -79,8 +71,6 @@ export function AuthProvider({ children }) {
         permissions,
         loading,
         authLoadingScreen,
-        showStaffGuide,
-        dismissStaffGuide,
         login,
         register,
         logout,

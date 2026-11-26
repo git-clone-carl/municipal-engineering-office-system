@@ -49,7 +49,7 @@ router.get('/', authenticate, checkPermission('permits'), (req, res) => {
   const pageNumber = Math.max(1, Number(page) || 1);
   const limitNumber = Math.min(200, Math.max(1, Number(limit) || 10));
   const offset = (pageNumber - 1) * limitNumber;
-  const showArchived = archived === '1' && ['admin', 'municipal_engineer'].includes(req.user.role);
+  const showArchived = archived === '1' && ['admin', 'engineering_staff', 'municipal_engineer'].includes(req.user.role);
   let where = showArchived ? 'COALESCE(p.is_archived, 0) = 1' : 'COALESCE(p.is_archived, 0) = 0';
   const params = [];
 
@@ -309,7 +309,7 @@ router.post('/:id/review', authenticate, checkPermission('permits'),
       logAudit(req.user.id, req.user.username, req.user.role,
         `Marked permit ${permit.application_no} for review`, getClientIp(req));
       notifyClient(permit.id, 'Application Under Review',
-        `Your application ${permit.application_no} is now under review by WNGR staff`, 'info');
+        `Your application ${permit.application_no} is now under review by Engineering Staff`, 'info');
 
       res.json({
         success: true,
@@ -477,9 +477,9 @@ router.post('/:id/release', authenticate, checkPermission('permits'),
     }
   });
 
-/** Admin / Municipal Engineer: archive a permit application. */
+/** Admin / Staff / Municipal Engineer: archive a permit application. */
 router.put('/:id/archive', authenticate, checkPermission('permits'),
-  requireRole('admin', 'municipal_engineer'), (req, res) => {
+  requireRole('admin', 'engineering_staff', 'municipal_engineer'), (req, res) => {
     const permit = loadPermit(req, res);
     if (!permit) return;
     db.prepare(`
@@ -492,9 +492,9 @@ router.put('/:id/archive', authenticate, checkPermission('permits'),
     res.json({ success: true, is_archived: true });
   });
 
-/** Admin / Municipal Engineer: restore an archived permit application. */
+/** Admin / Staff / Municipal Engineer: restore an archived permit application. */
 router.put('/:id/restore', authenticate, checkPermission('permits'),
-  requireRole('admin', 'municipal_engineer'), (req, res) => {
+  requireRole('admin', 'engineering_staff', 'municipal_engineer'), (req, res) => {
     const permit = loadPermit(req, res);
     if (!permit) return;
     db.prepare(`
@@ -505,6 +505,29 @@ router.put('/:id/restore', authenticate, checkPermission('permits'),
     logAudit(req.user.id, req.user.username, req.user.role,
       `Restored permit ${permit.application_no} from archive`, getClientIp(req));
     res.json({ success: true, is_archived: false });
+  });
+
+/** Admin / Staff / Municipal Engineer: permanently delete a permit application. */
+router.delete('/:id', authenticate, checkPermission('permits'),
+  requireRole('admin', 'engineering_staff', 'municipal_engineer'), (req, res) => {
+    const permit = loadPermit(req, res);
+    if (!permit) return;
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.prepare('DELETE FROM payments WHERE permit_id = ?').run(permit.id);
+      db.prepare('DELETE FROM notifications WHERE permit_id = ?').run(permit.id);
+      db.prepare('DELETE FROM approval_records WHERE permit_id = ?').run(permit.id);
+      db.prepare('DELETE FROM application_documents WHERE permit_id = ?').run(permit.id);
+      db.prepare('DELETE FROM permit_requirements WHERE permit_id = ?').run(permit.id);
+      db.prepare('DELETE FROM permits WHERE id = ?').run(permit.id);
+      db.exec('COMMIT');
+    } catch (err) {
+      try { db.exec('ROLLBACK'); } catch { /* ignore */ }
+      throw err;
+    }
+    logAudit(req.user.id, req.user.username, req.user.role,
+      `Deleted permit ${permit.application_no}`, getClientIp(req));
+    res.json({ success: true });
   });
 
 module.exports = router;

@@ -17,8 +17,10 @@ export default function Dashboard() {
   const [weekly, setWeekly] = useState([]);
   const [activities, setActivities] = useState([]);
   const [engineerRemarks, setEngineerRemarks] = useState([]);
+  const [recentNotifs, setRecentNotifs] = useState([]);
   const [liveToast, setLiveToast] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [, setNowTick] = useState(0);
   const toastTimerRef = useRef(null);
 
   const loadDashboard = useCallback(() => {
@@ -29,13 +31,15 @@ export default function Dashboard() {
       api.getWeeklyTransactions(),
       api.getRecentActivities(),
       api.getEngineerRemarks(),
-    ]).then(([s, m, d, w, a, r]) => {
+      api.getNotifications().catch(() => ({ notifications: [] })),
+    ]).then(([s, m, d, w, a, r, n]) => {
       setStats(s);
       setMonthly(m.map((x) => ({ ...x, label: x.month?.slice(5) || x.month })));
       setDistribution(d.map((x) => ({ name: STATUS_LABELS[x.status] || x.status, value: x.count })));
       setWeekly(w.map((x) => ({ ...x, label: x.day?.slice(5) || x.day })));
       setActivities(a);
       setEngineerRemarks(r || []);
+      setRecentNotifs((n?.notifications || []).slice(0, 8));
     }).finally(() => setLoading(false));
   }, []);
 
@@ -67,8 +71,10 @@ export default function Dashboard() {
     }
 
     const timer = setInterval(loadDashboard, 5000);
+    const clockTimer = setInterval(() => setNowTick((t) => t + 1), 15000);
     return () => {
       clearInterval(timer);
+      clearInterval(clockTimer);
       clearTimeout(toastTimerRef.current);
       if (es) es.close();
     };
@@ -93,7 +99,7 @@ export default function Dashboard() {
   }
 
   const canAddPermit = hasAccess('permits');
-  const canAddClient = hasAccess('clients') && ['admin', 'engineering_staff', 'municipal_engineer'].includes(user?.role);
+  const canAddClient = hasAccess('clients') && ['engineering_staff', 'municipal_engineer'].includes(user?.role);
 
   return (
     <div>
@@ -173,58 +179,100 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* Real-Time Engineer Remarks & Notifications Feed */}
-      <div className="card" style={{ marginBottom: 24 }}>
-        <div className="card-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <h3>Engineer Remarks &amp; Real-Time Updates</h3>
-            <span className="live-pill">
-              <span className="live-dot" /> Live
-            </span>
+      {/* Real-Time Notifications & Engineer Remarks Feed */}
+      <div className="chart-grid-2" style={{ marginBottom: 24 }}>
+        <div className="card">
+          <div className="card-header">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <h3>Real-Time Notifications</h3>
+              <span className="live-pill">
+                <span className="live-dot" /> Live
+              </span>
+            </div>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={loadDashboard}>
+              Refresh
+            </button>
           </div>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={loadDashboard}>
-            Refresh
-          </button>
-        </div>
-        <div className="card-body" style={{ padding: 0 }}>
-          {engineerRemarks.length === 0 ? (
-            <div className="empty-state" style={{ padding: 20 }}>No engineer remarks yet.</div>
-          ) : (
-            <div className="remarks-feed">
-              {engineerRemarks.map((item) => (
-                <div
-                  key={`${item.source}-${item.id}`}
-                  className="remarks-feed-item"
-                  onClick={() => navigate(`/permits?open=${item.permit_id}`)}
-                  style={{ cursor: 'pointer' }}
-                >
-                  <div className="remarks-feed-top">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                      <strong>{item.application_no}</strong>
-                      <span>&mdash; {item.client_name}</span>
-                      <span className={`badge badge-${item.status}`}>
-                        {DOCUMENT_STATUS_LABELS[item.status] || STATUS_LABELS[item.status] || item.status}
+          <div className="card-body" style={{ padding: 0 }}>
+            {recentNotifs.length === 0 ? (
+              <div className="empty-state" style={{ padding: 20 }}>No notifications yet.</div>
+            ) : (
+              <div className="remarks-feed">
+                {recentNotifs.map((n) => (
+                  <div
+                    key={n.id}
+                    className="remarks-feed-item"
+                    onClick={() => n.permit_id && navigate(`/permits?open=${n.permit_id}`)}
+                    style={{ cursor: n.permit_id ? 'pointer' : 'default' }}
+                  >
+                    <div className="remarks-feed-top">
+                      <strong>{n.title}</strong>
+                      <span className="doc-meta" title={formatDateTime(n.created_at)}>
+                        {timeAgo(n.created_at)} &middot; {formatDateTime(n.created_at)}
                       </span>
-                      {item.source === 'document' && item.document_type && (
-                        <span className="doc-meta">({item.document_type})</span>
+                    </div>
+                    <div className="remarks-feed-body">{n.message}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-header">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <h3>Engineer Remarks</h3>
+              <span className="live-pill">
+                <span className="live-dot" /> Live
+              </span>
+            </div>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={loadDashboard}>
+              Refresh
+            </button>
+          </div>
+          <div className="card-body" style={{ padding: 0 }}>
+            {engineerRemarks.length === 0 ? (
+              <div className="empty-state" style={{ padding: 20 }}>No engineer remarks yet.</div>
+            ) : (
+              <div className="remarks-feed">
+                {engineerRemarks.map((item) => (
+                  <div
+                    key={`${item.source}-${item.id}`}
+                    className="remarks-feed-item"
+                    onClick={() => navigate(`/permits?open=${item.permit_id}`)}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <div className="remarks-feed-top">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <strong>{item.application_no}</strong>
+                        <span>&mdash; {item.client_name}</span>
+                        <span className={`badge badge-${item.status}`}>
+                          {DOCUMENT_STATUS_LABELS[item.status] || STATUS_LABELS[item.status] || item.status}
+                        </span>
+                        {item.source === 'document' && item.document_type && (
+                          <span className="doc-meta">({item.document_type})</span>
+                        )}
+                      </div>
+                      <span className="doc-meta" title={formatDateTime(item.created_at)}>
+                        {timeAgo(item.created_at)} &middot; {formatDateTime(item.created_at)}
+                      </span>
+                    </div>
+                    <div className="remarks-feed-body">
+                      {item.remarks ? (
+                        <span>&ldquo;{item.remarks}&rdquo;</span>
+                      ) : (
+                        <span style={{ color: 'var(--text-light)' }}>No remarks text</span>
+                      )}
+                      {item.engineer_name && (
+                        <span className="doc-meta" style={{ marginLeft: 8 }}>&mdash; {item.engineer_name}</span>
                       )}
                     </div>
-                    <span className="doc-meta">{timeAgo(item.created_at)}</span>
                   </div>
-                  <div className="remarks-feed-body">
-                    {item.remarks ? (
-                      <span>&ldquo;{item.remarks}&rdquo;</span>
-                    ) : (
-                      <span style={{ color: 'var(--text-light)' }}>No remarks text</span>
-                    )}
-                    {item.engineer_name && (
-                      <span className="doc-meta" style={{ marginLeft: 8 }}>&mdash; {item.engineer_name}</span>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
