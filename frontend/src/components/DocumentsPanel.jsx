@@ -49,10 +49,12 @@ export default function DocumentsPanel({ permit, user, onChanged }) {
   const resetMessages = () => { setError(''); setSuccess(''); };
 
   const validateFile = (selected) => {
-    if (!selected) return 'Please choose a PDF file.';
-    const isPdf = selected.type === 'application/pdf' || /\.pdf$/i.test(selected.name);
-    if (!isPdf) return 'Only PDF files are allowed.';
-    if (selected.size > MAX_PDF_BYTES) return 'PDF is too large. Maximum size is 10 MB.';
+    if (!selected) return 'Please choose a PDF or image file.';
+    const isAllowed = selected.type === 'application/pdf'
+      || ['image/jpeg', 'image/png', 'image/webp'].includes(selected.type)
+      || /\.(pdf|jpe?g|png|webp)$/i.test(selected.name);
+    if (!isAllowed) return 'Only PDF or image files (JPG, PNG, WEBP) are allowed.';
+    if (selected.size > MAX_PDF_BYTES) return 'File is too large. Maximum size is 10 MB.';
     return '';
   };
 
@@ -348,11 +350,11 @@ export default function DocumentsPanel({ permit, user, onChanged }) {
           <input className="form-control" value={uploadType} onChange={(e) => setUploadType(e.target.value)} />
         </div>
         <div className="form-group">
-          <label>PDF File (max 10 MB)</label>
+          <label>PDF or Image File (JPG, PNG, WEBP — max 10 MB)</label>
           <input
             className="form-control"
             type="file"
-            accept="application/pdf,.pdf"
+            accept="application/pdf,.pdf,image/jpeg,image/png,image/webp"
             onChange={(e) => setFile(e.target.files?.[0] || null)}
           />
         </div>
@@ -374,11 +376,11 @@ export default function DocumentsPanel({ permit, user, onChanged }) {
         {error && <div className="login-error">{error}</div>}
         <p className="page-subtitle">The replacement resets the document status to Pending Review.</p>
         <div className="form-group">
-          <label>New PDF File (max 10 MB)</label>
+          <label>New PDF or Image File (JPG, PNG, WEBP — max 10 MB)</label>
           <input
             className="form-control"
             type="file"
-            accept="application/pdf,.pdf"
+            accept="application/pdf,.pdf,image/jpeg,image/png,image/webp"
             onChange={(e) => setFile(e.target.files?.[0] || null)}
           />
         </div>

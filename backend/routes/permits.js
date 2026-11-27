@@ -138,6 +138,7 @@ router.post('/', authenticate, checkPermission('permits'), async (req, res, next
     const {
       permit_type, electrical_subtype, client_id, client_email, application_date, project_location, nature_of_construction,
       building_type, total_floor_area, num_storeys, assigned_staff_id, notes,
+      total_fee: requestedTotalFee, fee_breakdown,
     } = req.body;
 
     if (!PERMIT_TYPES.includes(permit_type)) {
@@ -180,18 +181,24 @@ router.post('/', authenticate, checkPermission('permits'), async (req, res, next
       ? (ELECTRICAL_SUBTYPES.includes(electrical_subtype) ? electrical_subtype : 'electrification')
       : null;
     const application_no = generateAppNo(permit_type);
-    const total_fee = getFee(permit_type);
+    const parsedTotalFee = Number(requestedTotalFee);
+    const total_fee = Number.isFinite(parsedTotalFee) && parsedTotalFee > 0
+      ? Math.round((parsedTotalFee + Number.EPSILON) * 100) / 100
+      : getFee(permit_type);
+    const feeBreakdownJson = Array.isArray(fee_breakdown) && fee_breakdown.length > 0
+      ? JSON.stringify(fee_breakdown)
+      : (typeof fee_breakdown === 'string' && fee_breakdown.trim() ? fee_breakdown.trim() : null);
 
     const result = db.prepare(`
       INSERT INTO permits (application_no, permit_type, electrical_subtype, client_id, application_date, project_location,
-        nature_of_construction, building_type, total_floor_area, num_storeys, assigned_staff_id, total_fee, notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        nature_of_construction, building_type, total_floor_area, num_storeys, assigned_staff_id, total_fee, fee_breakdown, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       application_no, permit_type, resolvedSubtype, resolvedClientId,
       application_date || new Date().toISOString().split('T')[0],
       project_location || '', nature_of_construction || '', building_type || '',
       Number(total_floor_area) || 0, Number(num_storeys) || 1,
-      resolvedStaffId, total_fee, notes || '',
+      resolvedStaffId, total_fee, feeBreakdownJson, notes || '',
     );
 
     const permitId = Number(result.lastInsertRowid);

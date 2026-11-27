@@ -1,37 +1,18 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Modal, CustomSelect } from '../components/UI';
-import engineeringBg from '../bg/engineering-bg.jpg';
 
-const SIGNUP_ROLE_OPTIONS = [
-  { value: 'engineering_staff', label: 'Staff (Engineering Staff)' },
-  { value: 'municipal_engineer', label: 'Municipal Engineer' },
-  { value: 'admin', label: 'System Administrator' },
-];
+const SLIDESHOW_IMAGES = Array.from({ length: 12 }, (_, i) => `/slideshow/${i + 1}.jpg`);
 
 export default function Login() {
-  const { login, register } = useAuth();
+  const { login } = useAuth();
 
-  const [signupModalOpen, setSignupModalOpen] = useState(false);
-
-  // Unified Login state
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [remember, setRemember] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
-
-  // Sign up state (role selectable inside Sign Up modal, no email required)
-  const [signupForm, setSignupForm] = useState({
-    full_name: '',
-    role: 'engineering_staff',
-    username: '',
-    password: '',
-    confirm_password: '',
-  });
-  const [signupError, setSignupError] = useState('');
-  const [signupLoading, setSignupLoading] = useState(false);
+  const [bgIndex, setBgIndex] = useState(0);
 
   useEffect(() => {
     const saved = localStorage.getItem('remember_user');
@@ -39,6 +20,13 @@ export default function Login() {
       setUsername(saved);
       setRemember(true);
     }
+  }, []);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setBgIndex((i) => (i + 1) % SLIDESHOW_IMAGES.length);
+    }, 4500);
+    return () => clearInterval(timer);
   }, []);
 
   const handleLoginSubmit = async (e) => {
@@ -56,61 +44,27 @@ export default function Login() {
     }
   };
 
-  const handleSignupSubmit = async (e) => {
-    e.preventDefault();
-    setSignupError('');
-    const fullName = signupForm.full_name.trim();
-    const cleanUser = signupForm.username.trim();
-    if (!fullName || !cleanUser || !signupForm.password) {
-      setSignupError('Full name, username, and password are required.');
-      return;
-    }
-    if (cleanUser.length < 3) {
-      setSignupError('Username must be at least 3 characters.');
-      return;
-    }
-    if (signupForm.password.length < 6) {
-      setSignupError('Password must be at least 6 characters.');
-      return;
-    }
-    if (signupForm.password !== signupForm.confirm_password) {
-      setSignupError('Passwords do not match.');
-      return;
-    }
-
-    setSignupLoading(true);
-    try {
-      await register({
-        full_name: fullName,
-        username: cleanUser,
-        password: signupForm.password,
-        role: signupForm.role,
-      });
-    } catch (err) {
-      setSignupError(err.message || 'Sign up failed');
-    } finally {
-      setSignupLoading(false);
-    }
-  };
-
   return (
     <div className="fb-login-page">
       <div className="login-bg">
-        <img src={engineeringBg} alt="" className="login-bg-img active" />
+        {SLIDESHOW_IMAGES.map((src, i) => (
+          <img
+            key={src}
+            src={src}
+            alt=""
+            className={`login-bg-img ${i === bgIndex ? 'active' : ''}`}
+          />
+        ))}
         <div className="login-bg-overlay" />
       </div>
 
       <div className="fb-login-centered">
-        {/* Centered Logo & Title */}
+        {/* Centered Logo Only */}
         <div className="fb-centered-brand">
-          <img src="/gumacalogo.png" alt="MEO Logo" className="fb-meo-logo-centered" />
-          <h1 className="fb-brand-title-centered">Municipal Engineering Office</h1>
-          <p className="fb-brand-subtitle-centered">
-            Permit Management &amp; Engineering System
-          </p>
+          <img src="/gumacalogo.png" alt="Municipality of Gumaca" className="fb-meo-logo-centered" />
         </div>
 
-        {/* Single Unified Login Card (FB-style) */}
+        {/* Unified Login Card */}
         <div className="fb-login-card-wrap">
           <div className="fb-login-card">
             <form onSubmit={handleLoginSubmit}>
@@ -142,8 +96,18 @@ export default function Login() {
                     className="password-toggle"
                     onClick={() => setShowPassword(!showPassword)}
                     title={showPassword ? 'Hide password' : 'Show password'}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
                   >
-                    {showPassword ? 'Hide' : 'Show'}
+                    {showPassword ? (
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19M14.12 14.12a3 3 0 11-4.24-4.24M1 1l22 22" />
+                      </svg>
+                    ) : (
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                        <circle cx="12" cy="12" r="3" />
+                      </svg>
+                    )}
                   </button>
                 </div>
               </div>
@@ -168,105 +132,10 @@ export default function Login() {
               >
                 {loginLoading ? 'Logging in...' : 'Log In'}
               </button>
-
-              <div className="fb-divider" />
-
-              <div style={{ textAlign: 'center' }}>
-                <button
-                  type="button"
-                  className="btn fb-signup-btn"
-                  onClick={() => {
-                    setSignupError('');
-                    setSignupForm({
-                      full_name: '',
-                      role: 'engineering_staff',
-                      username: '',
-                      password: '',
-                      confirm_password: '',
-                    });
-                    setSignupModalOpen(true);
-                  }}
-                >
-                  Create New Account
-                </button>
-              </div>
             </form>
           </div>
-          <p className="fb-login-footer">
-            <strong>MEO</strong> &middot; Municipality of Gumaca, Quezon
-          </p>
         </div>
       </div>
-
-      {/* Sign Up Modal with Role Selection */}
-      <Modal
-        open={signupModalOpen}
-        onClose={() => setSignupModalOpen(false)}
-        title="Create New Account"
-      >
-        <form onSubmit={handleSignupSubmit}>
-          {signupError && <div className="login-error">{signupError}</div>}
-          <div className="form-group">
-            <label>Full Name *</label>
-            <input
-              className="form-control"
-              placeholder="Enter full name"
-              value={signupForm.full_name}
-              onChange={(e) => setSignupForm({ ...signupForm, full_name: e.target.value })}
-              required
-            />
-          </div>
-          <div className="form-group">
-            <label>Role *</label>
-            <CustomSelect
-              value={signupForm.role}
-              onChange={(val) => setSignupForm({ ...signupForm, role: val })}
-              options={SIGNUP_ROLE_OPTIONS}
-              style={{ width: '100%' }}
-            />
-          </div>
-          <div className="form-group">
-            <label>Username *</label>
-            <input
-              className="form-control"
-              placeholder="Choose a username"
-              value={signupForm.username}
-              onChange={(e) => setSignupForm({ ...signupForm, username: e.target.value })}
-              required
-            />
-          </div>
-          <div className="form-group">
-            <label>Password *</label>
-            <input
-              className="form-control"
-              type="password"
-              placeholder="At least 6 characters"
-              value={signupForm.password}
-              onChange={(e) => setSignupForm({ ...signupForm, password: e.target.value })}
-              required
-            />
-          </div>
-          <div className="form-group">
-            <label>Confirm Password *</label>
-            <input
-              className="form-control"
-              type="password"
-              placeholder="Re-enter password"
-              value={signupForm.confirm_password}
-              onChange={(e) => setSignupForm({ ...signupForm, confirm_password: e.target.value })}
-              required
-            />
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
-            <button type="button" className="btn btn-secondary" onClick={() => setSignupModalOpen(false)}>
-              Cancel
-            </button>
-            <button type="submit" className="btn fb-signup-btn" disabled={signupLoading}>
-              {signupLoading ? 'Creating account...' : 'Sign Up'}
-            </button>
-          </div>
-        </form>
-      </Modal>
     </div>
   );
 }

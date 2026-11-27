@@ -39,11 +39,11 @@ router.get('/stats', authenticate, checkPermission('dashboard'), (req, res) => {
   const paymentScope = client ? ' AND pay.client_id = ?' : '';
   const todayTransactions = db.prepare(`
     SELECT COUNT(*) as c, COALESCE(SUM(amount),0) as total FROM payments pay
-    WHERE date(payment_date) = date('now')${paymentScope}
+    WHERE date(payment_date) = date('now') AND COALESCE(pay.status, 'paid') = 'paid'${paymentScope}
   `).get(...params);
   const monthlyRevenue = db.prepare(`
     SELECT COALESCE(SUM(amount),0) as total FROM payments pay
-    WHERE strftime('%Y-%m', payment_date) = strftime('%Y-%m', 'now')${paymentScope}
+    WHERE strftime('%Y-%m', payment_date) = strftime('%Y-%m', 'now') AND COALESCE(pay.status, 'paid') = 'paid'${paymentScope}
   `).get(...params).total;
 
   res.json({

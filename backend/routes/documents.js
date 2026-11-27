@@ -90,11 +90,11 @@ router.post('/permit/:permitId', authenticate, checkPermission('permits'), uploa
     return res.status(403).json({ error: 'Documents can no longer be uploaded for this application' });
   }
   if (!req.file) {
-    return res.status(400).json({ error: 'A PDF file is required' });
+    return res.status(400).json({ error: 'A PDF or image file is required' });
   }
   if (!isPdfSignature(req.file.path)) {
     removeUploadedFile(req.file);
-    return res.status(400).json({ error: 'The uploaded file is not a valid PDF' });
+    return res.status(400).json({ error: 'The uploaded file is not a valid PDF or image' });
   }
 
   let requirement = null;
@@ -113,14 +113,15 @@ router.post('/permit/:permitId', authenticate, checkPermission('permits'), uploa
   ).trim().slice(0, 150) || 'Supporting Document';
 
   const documentNo = generateDocumentNo();
+  const mimeType = req.file.mimetype || 'application/pdf';
   const result = db.prepare(`
     INSERT INTO application_documents
       (document_no, permit_id, client_id, requirement_id, document_type, original_name,
        stored_name, mime_type, file_size, status, uploaded_by, uploaded_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 'application/pdf', ?, 'pending_review', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_review', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
   `).run(
     documentNo, permit.id, permit.client_id, requirement?.id || null, documentType,
-    req.file.originalname, req.file.filename, req.file.size, req.user.id,
+    req.file.originalname, req.file.filename, mimeType, req.file.size, req.user.id,
   );
 
   if (requirement && requirement.status !== 'submitted') {
@@ -159,20 +160,21 @@ router.post('/:id/replace', authenticate, checkPermission('permits'), uploadPdf,
     removeUploadedFile(req.file);
     return res.status(409).json({ error: 'Accepted documents cannot be replaced' });
   }
-  if (!req.file) return res.status(400).json({ error: 'A PDF file is required' });
+  if (!req.file) return res.status(400).json({ error: 'A PDF or image file is required' });
   if (!isPdfSignature(req.file.path)) {
     removeUploadedFile(req.file);
-    return res.status(400).json({ error: 'The uploaded file is not a valid PDF' });
+    return res.status(400).json({ error: 'The uploaded file is not a valid PDF or image' });
   }
 
   const oldPath = documentPath(doc.stored_name);
+  const mimeType = req.file.mimetype || 'application/pdf';
   db.prepare(`
     UPDATE application_documents
-    SET original_name = ?, stored_name = ?, mime_type = 'application/pdf', file_size = ?,
+    SET original_name = ?, stored_name = ?, mime_type = ?, file_size = ?,
         status = 'pending_review', remarks = NULL, reviewed_by = NULL, reviewed_at = NULL,
         uploaded_by = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
-  `).run(req.file.originalname, req.file.filename, req.file.size, req.user.id, doc.id);
+  `).run(req.file.originalname, req.file.filename, mimeType, req.file.size, req.user.id, doc.id);
   try { if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath); } catch { /* best effort */ }
 
   logAudit(req.user.id, req.user.username, req.user.role,
@@ -312,7 +314,7 @@ router.get('/:id/file', authenticate, (req, res) => {
 
   const safeName = String(doc.original_name || 'document.pdf').replace(/["\r\n]/g, '');
   const disposition = req.query.download === '1' ? 'attachment' : 'inline';
-  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Type', doc.mime_type || 'application/pdf');
   res.setHeader('Content-Disposition', `${disposition}; filename="${safeName}"`);
   res.setHeader('Cache-Control', 'private, no-store, max-age=0');
   res.setHeader('X-Content-Type-Options', 'nosniff');

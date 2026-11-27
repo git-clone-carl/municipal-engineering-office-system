@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const multer = require('multer');
 
 /**
- * PDF upload configuration.
+ * Document upload configuration (PDF and Image files).
  *
  * Files are stored outside the web root with randomised names. The API never
  * returns a storage path or public URL: documents are streamed through an
@@ -16,6 +16,15 @@ const UPLOAD_DIR = process.env.UPLOAD_DIR
 
 const MAX_FILE_SIZE = Number(process.env.MAX_PDF_SIZE || 10 * 1024 * 1024); // 10 MB
 
+const ALLOWED_MIMES = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+]);
+
+const ALLOWED_EXTS = new Set(['.pdf', '.jpg', '.jpeg', '.png', '.webp']);
+
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const storage = multer.diskStorage({
@@ -26,13 +35,18 @@ const storage = multer.diskStorage({
   },
 });
 
+function isAllowedFile(file) {
+  const ext = path.extname(file.originalname || '').toLowerCase();
+  return ALLOWED_MIMES.has(file.mimetype) && ALLOWED_EXTS.has(ext);
+}
+
 const pdfUpload = multer({
   storage,
   limits: { fileSize: MAX_FILE_SIZE, files: 1 },
   fileFilter: (_req, file, cb) => {
-    const isPdf = file.mimetype === 'application/pdf'
-      && path.extname(file.originalname || '').toLowerCase() === '.pdf';
-    if (!isPdf) return cb(new Error('Only PDF files are allowed'));
+    if (!isAllowedFile(file)) {
+      return cb(new Error('Only PDF or image files (JPG, PNG, WEBP) are allowed'));
+    }
     cb(null, true);
   },
 });
@@ -41,9 +55,9 @@ const pdfMultipleUpload = multer({
   storage,
   limits: { fileSize: MAX_FILE_SIZE, files: 15 },
   fileFilter: (_req, file, cb) => {
-    const isPdf = file.mimetype === 'application/pdf'
-      && path.extname(file.originalname || '').toLowerCase() === '.pdf';
-    if (!isPdf) return cb(new Error('Only PDF files are allowed'));
+    if (!isAllowedFile(file)) {
+      return cb(new Error('Only PDF or image files (JPG, PNG, WEBP) are allowed'));
+    }
     cb(null, true);
   },
 });
@@ -53,7 +67,7 @@ function uploadPdf(req, res, next) {
   pdfUpload.single('file')(req, res, (err) => {
     if (err) {
       const message = err.code === 'LIMIT_FILE_SIZE'
-        ? `PDF is too large. Maximum size is ${Math.round(MAX_FILE_SIZE / (1024 * 1024))} MB.`
+        ? `File is too large. Maximum size is ${Math.round(MAX_FILE_SIZE / (1024 * 1024))} MB.`
         : err.message || 'Upload failed';
       return res.status(400).json({ error: message });
     }
@@ -65,7 +79,7 @@ function uploadMultiplePdfs(req, res, next) {
   pdfMultipleUpload.array('files', 15)(req, res, (err) => {
     if (err) {
       const message = err.code === 'LIMIT_FILE_SIZE'
-        ? `PDF is too large. Maximum size is ${Math.round(MAX_FILE_SIZE / (1024 * 1024))} MB.`
+        ? `File is too large. Maximum size is ${Math.round(MAX_FILE_SIZE / (1024 * 1024))} MB.`
         : err.message || 'Upload failed';
       return res.status(400).json({ error: message });
     }
@@ -73,14 +87,24 @@ function uploadMultiplePdfs(req, res, next) {
   });
 }
 
-/** Verify the file really starts with a PDF signature. */
+/** Verify the file starts with a valid PDF, JPEG, PNG, or WEBP magic signature. */
 function isPdfSignature(filePath) {
   try {
     const fd = fs.openSync(filePath, 'r');
-    const buffer = Buffer.alloc(5);
-    const bytes = fs.readSync(fd, buffer, 0, 5, 0);
+    const buffer = Buffer.alloc(12);
+    const bytes = fs.readSync(fd, buffer, 0, 12, 0);
     fs.closeSync(fd);
-    return bytes >= 5 && buffer.toString('ascii') === '%PDF-';
+    if (bytes < 4) return false;
+    // PDF: %PDF-
+    if (bytes >= 5 && buffer.subarray(0, 5).toString('ascii') === '%PDF-') return true;
+    // PNG: 89 50 4E 47
+    if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) return true;
+    // JPEG: FF D8 FF
+    if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) return true;
+    // WEBP: RIFF....WEBP
+    if (bytes >= 12 && buffer.subarray(0, 4).toString('ascii') === 'RIFF'
+      && buffer.subarray(8, 12).toString('ascii') === 'WEBP') return true;
+    return false;
   } catch {
     return false;
   }

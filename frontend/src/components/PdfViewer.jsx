@@ -111,16 +111,33 @@ export default function PdfViewer({ document, canDownload = true, canReplace = f
       </div>
 
       {error && <div className="login-error" style={{ margin: 12 }}>{error}</div>}
-      {loading && <div className="loading">Loading PDF...</div>}
+      {loading && <div className="loading">Loading document...</div>}
 
       <div className="pdf-frame-wrap" ref={frameWrapRef}>
         {url && (
-          <iframe
-            title={document.original_name || 'PDF document'}
-            src={`${url}#toolbar=1&navpanes=0&view=FitH`}
-            className="pdf-frame"
-            style={{ transform: `scale(${zoom / 100})`, transformOrigin: 'top center' }}
-          />
+          (document.mime_type?.startsWith('image/') || /\.(jpe?g|png|webp)$/i.test(document.original_name || '')) ? (
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: 16, overflow: 'auto', width: '100%', height: '100%' }}>
+              <img
+                src={url}
+                alt={document.original_name || 'Document image'}
+                style={{
+                  maxWidth: '100%',
+                  height: 'auto',
+                  transform: `scale(${zoom / 100})`,
+                  transformOrigin: 'top center',
+                  borderRadius: 8,
+                  boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+                }}
+              />
+            </div>
+          ) : (
+            <iframe
+              title={document.original_name || 'PDF document'}
+              src={`${url}#toolbar=1&navpanes=0&view=FitH`}
+              className="pdf-frame"
+              style={{ transform: `scale(${zoom / 100})`, transformOrigin: 'top center' }}
+            />
+          )
         )}
       </div>
       <p className="pdf-hint">

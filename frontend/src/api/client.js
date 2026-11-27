@@ -86,6 +86,8 @@ export const api = {
   getPendingPayments: () => request('/payments/pending'),
   getPermitPayments: (permitId) => request(`/payments/permit/${permitId}`),
   createPayment: (data) => request('/payments', { method: 'POST', body: JSON.stringify(data) }),
+  issueOrderOfPayment: (permit_id) => request('/payments/order', { method: 'POST', body: JSON.stringify({ permit_id }) }),
+  markPaymentPaid: (id) => request(`/payments/${id}/mark-paid`, { method: 'POST' }),
   getReceipt: (id) => request(`/payments/${id}/receipt`),
 
   getUsers: (params) => request(`/users?${new URLSearchParams(params)}`),

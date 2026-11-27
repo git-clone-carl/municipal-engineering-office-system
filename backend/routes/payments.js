@@ -182,10 +182,142 @@ router.post('/', authenticate, checkPermission('payments'),
     });
   });
 
+function generateOP() {
+  const year = new Date().getFullYear();
+  const prefix = `OP-${year}-`;
+  const row = db.prepare(`
+    SELECT MAX(CAST(substr(or_number, ?) AS INTEGER)) AS max_seq
+    FROM payments WHERE or_number LIKE ?
+  `).get(prefix.length + 1, `${prefix}%`);
+  let sequence = Number(row?.max_seq || 0) + 1;
+  let opNumber = `${prefix}${String(sequence).padStart(5, '0')}`;
+  while (db.prepare('SELECT id FROM payments WHERE or_number = ?').get(opNumber)) {
+    sequence += 1;
+    opNumber = `${prefix}${String(sequence).padStart(5, '0')}`;
+  }
+  return opNumber;
+}
+
+/**
+ * Issue an Order of Payment for an engineer-approved permit.
+ * Does NOT mark the permit as paid yet; the client pays at the Treasurer's Office
+ * and returns with a receipt, after which Staff clicks "Mark as Paid".
+ */
+router.post('/order', authenticate, checkPermission('payments'),
+  requireRole('admin', 'engineering_staff', 'municipal_engineer'), (req, res, next) => {
+    const permitId = Number(req.body?.permit_id);
+    if (!Number.isInteger(permitId) || permitId <= 0) {
+      return res.status(400).json({ error: 'A valid permit application is required' });
+    }
+    const permit = db.prepare('SELECT * FROM permits WHERE id = ?').get(permitId);
+    if (!permit) return res.status(404).json({ error: 'Permit application not found' });
+    if (permit.status === 'paid' || permit.status === 'released') {
+      return res.status(409).json({ error: 'This application has already been paid' });
+    }
+
+    // If a pending Order of Payment already exists for this permit, return it.
+    const existing = db.prepare(
+      "SELECT * FROM payments WHERE permit_id = ? AND COALESCE(status, 'paid') = 'pending' ORDER BY id DESC LIMIT 1"
+    ).get(permitId);
+    if (existing) {
+      return res.json({
+        id: existing.id,
+        or_number: existing.or_number,
+        amount: existing.amount,
+        status: 'pending',
+      });
+    }
+
+    if (!['approved', 'for_payment'].includes(permit.status)) {
+      return res.status(409).json({
+        error: `Order of Payment can only be issued after Engineer approval (current: ${permit.status}).`,
+      });
+    }
+
+    const amountDue = round2(Math.max(0, permit.total_fee - permit.amount_paid));
+    let paymentId;
+    let opNumber;
+    try {
+      db.exec('BEGIN IMMEDIATE');
+      opNumber = generateOP();
+      const result = db.prepare(`
+        INSERT INTO payments (or_number, permit_id, client_id, amount, payment_method, cashier_id, notes, status)
+        VALUES (?, ?, ?, ?, 'cash', ?, 'Order of Payment issued for Municipal Treasurer''s Office', 'pending')
+      `).run(opNumber, permitId, permit.client_id, amountDue, req.user.id);
+      paymentId = Number(result.lastInsertRowid);
+      db.prepare(`
+        UPDATE permits SET status = 'for_payment', updated_at = CURRENT_TIMESTAMP WHERE id = ?
+      `).run(permitId);
+      db.exec('COMMIT');
+    } catch (err) {
+      try { db.exec('ROLLBACK'); } catch { /* ignore */ }
+      return next(err);
+    }
+
+    logAudit(req.user.id, req.user.username, req.user.role,
+      `Issued Order of Payment ${opNumber} (PHP ${amountDue.toFixed(2)}) for ${permit.application_no}`, getClientIp(req));
+    notifyRole(['engineering_staff', 'admin', 'municipal_engineer'], 'Order of Payment Issued',
+      `Order of Payment ${opNumber} issued for ${permit.application_no}. Awaiting payment at Treasurer's Office.`, 'info', permitId);
+
+    res.status(201).json({
+      id: paymentId,
+      or_number: opNumber,
+      amount: amountDue,
+      status: 'pending',
+    });
+  });
+
+/**
+ * Mark an issued Order of Payment as Paid once the client returns from the
+ * Municipal Treasurer's Office with their receipt.
+ */
+router.post('/:id/mark-paid', authenticate, checkPermission('payments'),
+  requireRole('admin', 'engineering_staff'), (req, res, next) => {
+    const payment = db.prepare('SELECT * FROM payments WHERE id = ?').get(req.params.id);
+    if (!payment) return res.status(404).json({ error: 'Order of Payment not found' });
+    if (payment.status === 'paid') {
+      return res.status(409).json({ error: 'This Order of Payment is already marked as paid' });
+    }
+    const permit = db.prepare('SELECT * FROM permits WHERE id = ?').get(payment.permit_id);
+    if (!permit) return res.status(404).json({ error: 'Permit application not found' });
+
+    try {
+      db.exec('BEGIN IMMEDIATE');
+      db.prepare(`
+        UPDATE payments
+        SET status = 'paid', paid_at = CURRENT_TIMESTAMP, payment_date = CURRENT_TIMESTAMP,
+            cashier_id = COALESCE(cashier_id, ?)
+        WHERE id = ?
+      `).run(req.user.id, payment.id);
+      db.prepare(`
+        UPDATE permits
+        SET amount_paid = total_fee, status = 'paid',
+            payment_date = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(permit.id);
+      db.exec('COMMIT');
+    } catch (err) {
+      try { db.exec('ROLLBACK'); } catch { /* ignore */ }
+      return next(err);
+    }
+
+    logAudit(req.user.id, req.user.username, req.user.role,
+      `Marked ${payment.or_number} (${permit.application_no}) as PAID`, getClientIp(req));
+    notifyClient(permit.id, 'Payment Confirmed',
+      `Payment for ${permit.application_no} (${payment.or_number}) has been marked as paid.`, 'success');
+    notifyRole(['engineering_staff', 'admin'], 'Paid & Ready for Release',
+      `${permit.application_no} (${payment.or_number}) has been marked as PAID and is ready for release.`, 'success', permit.id);
+    notifyRole(['municipal_engineer'], 'Payment Completed',
+      `${permit.application_no} (${payment.or_number}) was marked as PAID.`, 'success', permit.id);
+
+    res.json({ success: true, status: 'paid' });
+  });
+
 router.get('/:id/receipt', authenticate, (req, res) => {
   const payment = db.prepare(`
     SELECT pay.*, c.full_name as client_name, c.address, c.contact_number, c.email,
-           p.application_no, p.permit_type, p.project_location, p.total_fee, p.amount_paid, p.status AS permit_status,
+           p.application_no, p.permit_type, p.project_location, p.total_fee, p.amount_paid,
+           p.fee_breakdown, p.status AS permit_status,
            u.full_name as cashier_name, u.user_id AS cashier_code
     FROM payments pay
     JOIN clients c ON pay.client_id = c.id

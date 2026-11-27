@@ -93,20 +93,38 @@ router.post('/restore', authenticate, checkPermission('settings'), (req, res) =>
 
 router.get('/permit/:id/preview', authenticate, checkPermission('permits'), async (req, res) => {
   const permit = db.prepare(`
-    SELECT p.*, c.full_name as client_name, c.address as client_address, c.email as client_email
-    FROM permits p JOIN clients c ON p.client_id = c.id WHERE p.id = ?
+    SELECT p.*, c.full_name as client_name, c.address as client_address, c.email as client_email,
+           e.full_name as approved_by_name,
+           s.full_name as assigned_staff_name,
+           s.role as assigned_staff_role
+    FROM permits p
+    JOIN clients c ON p.client_id = c.id
+    LEFT JOIN users e ON p.approved_by = e.id
+    LEFT JOIN users s ON p.assigned_staff_id = s.id
+    WHERE p.id = ?
   `).get(req.params.id);
   if (!permit) return res.status(404).json({ error: 'Permit not found' });
   const office = db.prepare('SELECT * FROM office_info WHERE id = 1').get();
+  const activeEngineer = db.prepare(
+    "SELECT full_name FROM users WHERE role = 'municipal_engineer' AND status = 'active' ORDER BY id ASC LIMIT 1"
+  ).get();
   const signatoryRows = db.prepare(
     "SELECT key, value FROM settings WHERE key IN ('assessed_by_name', 'assessed_by_title', 'approved_by_name', 'approved_by_title')"
   ).all();
+  const storedSignatories = Object.fromEntries(signatoryRows.map((r) => [r.key, r.value]));
+  const dynamicEngineerName = permit.approved_by_name
+    || (permit.assigned_staff_role === 'municipal_engineer' ? permit.assigned_staff_name : null)
+    || activeEngineer?.full_name
+    || storedSignatories.approved_by_name
+    || 'Municipal Engineer';
+  const dynamicAssessedByName = (permit.assigned_staff_role !== 'municipal_engineer' && permit.assigned_staff_name)
+    ? permit.assigned_staff_name
+    : (storedSignatories.assessed_by_name || 'Engr. Jer Anthony F. Palo');
   const signatories = {
-    assessed_by_name: 'Engr. Jer Anthony F. Palo',
-    assessed_by_title: 'Engineer III',
-    approved_by_name: 'Engr. Aireen Mañago-Ubas',
-    approved_by_title: 'Building Official',
-    ...Object.fromEntries(signatoryRows.map((r) => [r.key, r.value])),
+    assessed_by_name: dynamicAssessedByName,
+    assessed_by_title: storedSignatories.assessed_by_title || 'Engineer II',
+    approved_by_name: dynamicEngineerName,
+    approved_by_title: storedSignatories.approved_by_title || 'Municipal Engineer / Building Official',
   };
   const verifyUrl = `PERMIT:${permit.application_no}:${permit.id}`;
   const qrCode = await QRCode.toDataURL(verifyUrl);

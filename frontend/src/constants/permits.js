@@ -3,7 +3,7 @@ export const PERMIT_TYPES = {
   electrical: 'Electrical Permit',
   occupancy: 'Occupancy Permit',
   annual_inspection: 'Certificate of Annual Inspection',
-  certificate: 'Certificate',
+  certificate: 'Certification',
 };
 
 export const ELECTRICAL_SUBTYPES = {

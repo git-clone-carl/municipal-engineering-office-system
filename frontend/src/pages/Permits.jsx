@@ -7,6 +7,7 @@ import {
   formatDateTime, formatFileSize, CustomSelect, CustomDatePicker,
 } from '../components/UI';
 import { ELECTRICAL_SUBTYPES, getRequirementsForPermit } from '../constants/permits';
+import { getFeeTemplate, computeFeeTotal, buildFeeBreakdownItems } from '../constants/fees';
 import DocumentsPanel from '../components/DocumentsPanel';
 import Receipt from '../components/Receipt';
 import PermitAssessmentSheet from '../components/PermitAssessmentSheet';
@@ -24,7 +25,7 @@ import {
   validatePermitSpecs,
 } from '../utils/validation';
 
-const STEPS = ['Application Details', 'Requirements', 'Payment', 'Review'];
+const STEPS = ['Application Details', 'Requirements', 'Order of Payment', 'Review'];
 const STATUS_FLOW = ['submitted', 'for_review', 'for_approval', 'approved', 'paid', 'released'];
 
 const emptyForm = {
@@ -83,6 +84,8 @@ export default function Permits() {
   const [validatingStep, setValidatingStep] = useState(false);
   const [natureOther, setNatureOther] = useState(false);
   const [buildingOther, setBuildingOther] = useState(false);
+  const [feeItems, setFeeItems] = useState({});
+  const [feeOthersLabel, setFeeOthersLabel] = useState('');
   const [viewTab, setViewTab] = useState('details');
   const [archiveView, setArchiveView] = useState('active');
 
@@ -185,6 +188,8 @@ export default function Permits() {
       client_id: myClient?.id ? String(myClient.id) : '',
     });
     setRequirementFiles({});
+    setFeeItems({});
+    setFeeOthersLabel('');
     setNatureOther(false);
     setBuildingOther(false);
     setStep(0);
@@ -253,8 +258,11 @@ export default function Permits() {
   const handleReqFileChange = (reqName, file) => {
     setError('');
     if (!file) return;
-    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
-      setError(`"${file.name}" is not a PDF file. Only PDF files are allowed.`);
+    const isAllowed = file.type === 'application/pdf'
+      || ['image/jpeg', 'image/png', 'image/webp'].includes(file.type)
+      || /\.(pdf|jpe?g|png|webp)$/i.test(file.name);
+    if (!isAllowed) {
+      setError(`"${file.name}" is not supported. Only PDF or image files (JPG, PNG, WEBP) are allowed.`);
       return;
     }
     setRequirementFiles((prev) => ({ ...prev, [reqName]: file }));
@@ -292,13 +300,6 @@ export default function Permits() {
         return;
       }
     }
-    if (step === 1) {
-      const missing = requiredDocs.filter((r) => !requirementFiles[r]);
-      if (missing.length > 0) {
-        setError(`You cannot proceed without uploading all required PDF documents. Missing: ${missing.join(', ')}`);
-        return;
-      }
-    }
     if (step === 2) {
       const specsErr = validatePermitSpecs({
         total_floor_area: form.total_floor_area,
@@ -327,12 +328,6 @@ export default function Permits() {
       setStep(0);
       return;
     }
-    const missing = requiredDocs.filter((r) => !requirementFiles[r]);
-    if (missing.length > 0) {
-      setError(`Please upload all required PDF documents. Missing: ${missing.join(', ')}`);
-      setStep(1);
-      return;
-    }
     const notesErr = validateNotes(form.notes);
     if (notesErr) {
       setError(notesErr);
@@ -354,6 +349,9 @@ export default function Permits() {
           .catch(() => {});
       }
 
+      const computedTotal = computeFeeTotal(feeItems);
+      const breakdownItems = buildFeeBreakdownItems(form.permit_type, feeItems, feeOthersLabel);
+
       const created = await api.createPermit({
         ...form,
         client_id: Number(clientId),
@@ -362,6 +360,8 @@ export default function Permits() {
           : null,
         total_floor_area: Number(form.total_floor_area || 0),
         num_storeys: Number(form.num_storeys || 1),
+        total_fee: computedTotal > 0 ? computedTotal : undefined,
+        fee_breakdown: breakdownItems.length > 0 ? breakdownItems : undefined,
       });
 
       const detail = await api.getPermit(created.id);
@@ -648,7 +648,12 @@ export default function Permits() {
                 <label>Permit Type</label>
                 <CustomSelect
                   value={form.permit_type}
-                  onChange={(val) => { setForm({ ...form, permit_type: val }); setRequirementFiles({}); }}
+                  onChange={(val) => {
+                    setForm({ ...form, permit_type: val });
+                    setRequirementFiles({});
+                    setFeeItems({});
+                    setFeeOthersLabel('');
+                  }}
                   options={Object.entries(PERMIT_TYPES).map(([key, label]) => ({ value: key, label }))}
                   style={{ width: '100%' }}
                 />
@@ -828,7 +833,7 @@ export default function Permits() {
           <div className="card">
             <div className="card-body">
               <p style={{ marginBottom: 12 }}>
-                Upload all required PDF documents for <strong>{PERMIT_TYPES[form.permit_type]}</strong>. You cannot proceed without uploading every requirement.
+                Upload PDF or image documents (JPG, PNG, WEBP) for <strong>{PERMIT_TYPES[form.permit_type]}</strong>. You may proceed even without uploading all requirements now.
               </p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {requiredDocs.map((reqName) => {
@@ -848,16 +853,16 @@ export default function Permits() {
                       }}
                     >
                       <div style={{ minWidth: 0 }}>
-                        <div style={{ fontWeight: 600, fontSize: 13.5 }}>{reqName} *</div>
+                        <div style={{ fontWeight: 600, fontSize: 13.5 }}>{reqName}</div>
                         <div style={{ fontSize: 12, color: file ? 'var(--green-800)' : 'var(--text-light)' }}>
-                          {file ? `Uploaded: ${file.name} (${formatFileSize(file.size)})` : 'Required (PDF only, max 10 MB)'}
+                          {file ? `Uploaded: ${file.name} (${formatFileSize(file.size)})` : 'Optional (PDF or Image, max 10 MB)'}
                         </div>
                       </div>
                       <label className="btn btn-secondary" style={{ cursor: 'pointer', whiteSpace: 'nowrap', margin: 0 }}>
-                        <Icon name="upload" size={14} /> {file ? 'Change PDF' : 'Upload PDF'}
+                        <Icon name="upload" size={14} /> {file ? 'Change File' : 'Upload PDF / Image'}
                         <input
                           type="file"
-                          accept=".pdf,application/pdf"
+                          accept=".pdf,application/pdf,image/jpeg,image/png,image/webp"
                           style={{ display: 'none' }}
                           onChange={(e) => handleReqFileChange(reqName, e.target.files?.[0])}
                         />
@@ -870,37 +875,100 @@ export default function Permits() {
           </div>
         )}
 
-        {step === 2 && (
-          <div className="card">
-            <div className="card-body">
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Estimated Floor Area (sq)</label>
-                  <input
-                    className="form-control"
-                    type="text"
-                    inputMode="decimal"
-                    placeholder="Enter floor area in sq (e.g. 120.5)"
-                    value={form.total_floor_area}
-                    onChange={(e) => setForm({ ...form, total_floor_area: filterDecimalInput(e.target.value) })}
-                  />
+        {step === 2 && (() => {
+          const feeRows = getFeeTemplate(form.permit_type);
+          const computedTotal = computeFeeTotal(feeItems);
+          return (
+            <div className="card">
+              <div className="card-header">
+                <h3>Order of Payment &mdash; {PERMIT_TYPES[form.permit_type]}</h3>
+              </div>
+              <div className="card-body">
+                <div className="form-row" style={{ marginBottom: 14 }}>
+                  <div className="form-group">
+                    <label>Estimated Floor Area (sq)</label>
+                    <input
+                      className="form-control"
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="Enter floor area in sq (e.g. 120.5)"
+                      value={form.total_floor_area}
+                      onChange={(e) => setForm({ ...form, total_floor_area: filterDecimalInput(e.target.value) })}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Number of Storeys</label>
+                    <input
+                      className="form-control"
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="1"
+                      value={form.num_storeys}
+                      onChange={(e) => setForm({ ...form, num_storeys: filterIntegerInput(e.target.value) })}
+                    />
+                  </div>
                 </div>
-                <div className="form-group">
-                  <label>Number of Storeys</label>
-                  <input
-                    className="form-control"
-                    type="text"
-                    inputMode="numeric"
-                    placeholder="1"
-                    value={form.num_storeys}
-                    onChange={(e) => setForm({ ...form, num_storeys: filterIntegerInput(e.target.value) })}
-                  />
+
+                <div style={{ border: '1px solid var(--border-color)', borderRadius: 10, padding: 14, background: 'var(--bg-subcard)' }}>
+                  <div style={{ fontWeight: 700, fontSize: 13.5, marginBottom: 10, color: 'var(--text-main)' }}>
+                    Itemized Fees (Enter applicable amounts — total computes automatically)
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {feeRows.map((row) => (
+                      <div
+                        key={row.key}
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: '1fr 160px',
+                          gap: 10,
+                          alignItems: 'center',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontSize: 13.5, fontWeight: 600 }}>{row.label}:</span>
+                          {row.key === 'others' && (
+                            <input
+                              className="form-control"
+                              style={{ padding: '4px 8px', fontSize: 12.5, maxWidth: 200 }}
+                              placeholder="Specify others..."
+                              value={feeOthersLabel}
+                              onChange={(e) => setFeeOthersLabel(e.target.value)}
+                            />
+                          )}
+                        </div>
+                        <input
+                          className="form-control"
+                          type="text"
+                          inputMode="decimal"
+                          placeholder="0.00"
+                          style={{ textAlign: 'right' }}
+                          value={feeItems[row.key] || ''}
+                          onChange={(e) => setFeeItems((prev) => ({
+                            ...prev,
+                            [row.key]: filterDecimalInput(e.target.value),
+                          }))}
+                        />
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{ marginTop: 14, paddingTop: 12, borderTop: '2px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <strong style={{ fontSize: 15 }}>TOTAL ORDER OF PAYMENT</strong>
+                    <strong style={{ fontSize: 18, color: 'var(--primary)' }}>{formatCurrency(computedTotal)}</strong>
+                  </div>
+
+                  {computedTotal > 0 && (
+                    <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, fontSize: 12.5, color: 'var(--text-muted)' }}>
+                      <div>LGU (80%): <strong>{formatCurrency(computedTotal * 0.8)}</strong></div>
+                      <div>DPWH (5%): <strong>{formatCurrency(computedTotal * 0.05)}</strong></div>
+                      <div>OBO (15%): <strong>{formatCurrency(computedTotal * 0.15)}</strong></div>
+                    </div>
+                  )}
                 </div>
               </div>
-              <p>Permit fees are calculated from system settings. Payment is only enabled after the Municipal Engineer approves the application.</p>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {step === 3 && (
           <div className="card">
@@ -1163,7 +1231,23 @@ export default function Permits() {
 
                 {viewTab === 'payments' && (
                   <div className="card">
-                    <div className="card-header"><h3>Payments</h3></div>
+                    <div className="card-header">
+                      <h3>Order of Payment &amp; Payments</h3>
+                      {isStaff && selectedPermit.status === 'approved' && (
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          disabled={actionLoading}
+                          onClick={() => runAction(async () => {
+                            const res = await api.issueOrderOfPayment(selectedPermit.id);
+                            await openReceipt(res.id);
+                            return res;
+                          }, 'Order of Payment issued.')}
+                        >
+                          Issue Order of Payment
+                        </button>
+                      )}
+                    </div>
                     <div className="card-body">
                       {selectedPermit.payments?.length ? selectedPermit.payments.map((payment) => (
                         <div key={payment.id} className="payment-record">
@@ -1171,14 +1255,27 @@ export default function Permits() {
                             <strong>{payment.or_number}</strong>
                             <div className="doc-meta">{formatDateTime(payment.payment_date)} · {payment.cashier_name || '-'}</div>
                           </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                            <span className={`badge badge-${payment.status === 'pending' ? 'for_payment' : 'paid'}`}>
+                              {payment.status === 'pending' ? 'Unpaid' : 'Paid'}
+                            </span>
                             <strong>{formatCurrency(payment.amount)}</strong>
                             <button type="button" className="btn btn-secondary btn-sm" onClick={() => openReceipt(payment.id)}>
-                              Receipt
+                              Order of Payment
                             </button>
+                            {payment.status === 'pending' && isStaff && (
+                              <button
+                                type="button"
+                                className="btn btn-success btn-sm"
+                                disabled={actionLoading}
+                                onClick={() => runAction(() => api.markPaymentPaid(payment.id), 'Payment marked as PAID.')}
+                              >
+                                Mark as Paid
+                              </button>
+                            )}
                           </div>
                         </div>
-                      )) : <p className="page-subtitle">No payment recorded yet.</p>}
+                      )) : <p className="page-subtitle">No Order of Payment issued yet.</p>}
                     </div>
                   </div>
                 )}
@@ -1229,7 +1326,7 @@ export default function Permits() {
         {previewData && <PermitAssessmentSheet data={previewData} />}
       </Modal>
 
-      <Modal open={!!receiptData} onClose={() => setReceiptData(null)} title="Official Receipt" large>
+      <Modal open={!!receiptData} onClose={() => setReceiptData(null)} title="Order of Payment" large>
         {receiptData && <Receipt data={receiptData} />}
       </Modal>
     </div>
